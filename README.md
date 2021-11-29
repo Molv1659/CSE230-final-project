@@ -44,41 +44,65 @@ The program is based on 3 main modules:
 See the Program Structure part
 ### What challenges (if any) did you have so far and how did you solve them?
 Logit part: 
+
 How to deal with the Ko situation. When we find the prisoners, we  need to check whether it’s the Ko situation, if yes, label it, and need to unlabel it later. So the states of the go board not only contain BLACK, WHITRE, EMPTY but also KO.
 
 UI part: 
+
 How to render according to different board sizes.
+
 Need information about the board to render correctly - Sync with the logic part to reach a consensus about what functions and values are needed.
 
 Network part:
+
 What data structure should be sent through the network.
+
 How to keep the Socket connection.
+
 Can a user be in receiving mode when other user sends it a message?(How to organize the logic inside every role in the system)
 	
 ### Do you expect to meet your goals until the deadline?
 Logit part: 
+
 before 12.3 finish logit part, later cooperate with other teammates about the API.
 
 UI part: 
+
 split the tasks between two team members to make progress synchronously.
+
 Clarified what UI components are needed and the actions attached to them.
 
 Network part:
+
 Should be finished in the ncoming two days because this is the basic part of multiple playing.
 
 ### If not, how will you modify your goals?
 Finish goals with higher priority (build the MVP first before trying to realize additional features)
+
 MVP includes:
+
 UI:
+
 renders the board, pieces on the board, player info, current score, and player IP
+
 Handles user interactions and updates UI accordingly
+
 Logic:
+
 Makes changes to game data according to user actions
+
 Passes necessary information (e.g. state of the game, score, etc.) to UI
+
 Network:
+
 Only support two players to play(not support observers)
+
 Additional features:
+
 Allows audiences to join the game room and watch the ongoing game
+
 Allows audiences to see a history of moves made by the current players
+
 Stretch goals:
+
 Allows users to select from a series of classic Go game problems and play with themselves
