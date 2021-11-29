@@ -43,15 +43,24 @@ The program is based on 3 main modules:
 ### What is the architecture of your application (the key components)?
 See the Program Structure part
 ### What challenges (if any) did you have so far and how did you solve them?
-**Logit part**: 
+**Logic part**: 
 
 How to deal with the Ko situation. When we find the prisoners, we  need to check whether it’s the Ko situation, if yes, label it, and need to unlabel it later. So the states of the go board not only contain BLACK, WHITRE, EMPTY but also KO.
 
 **UI part**: 
 
-How to render according to different board sizes.
+- Rendering:
+  - Render the board according to different board sizes and different situations
+    - Used the joinable border to draw the game board and used special characters in the Unicode to represent black/white stones
+- Interaction with Game logic
+  - Provide input for user to enter opponent's IP address/color choice/board size
+  - Map the mouse input to its closest intersection to get the corresponding stone position on the board
+  - Upon the result of the logic, update the go board
+  - (Advanced) Provide board history
+    - Will need a log to record the change of the board for each move
 
-Need information about the board to render correctly - Sync with the logic part to reach a consensus about what functions and values are needed.
+Need to collaborate with the logic part owner to make sure that all data necessary are provided and all input related are given to the game logic.
+
 
 **Network part**:
 
@@ -70,11 +79,12 @@ before 12.3 finish logit part, later cooperate with other teammates about the AP
 
 split the tasks between two team members to make progress synchronously.
 
+Plan to finish board rendering before 12.2 and stone input before 12.5
 Clarified what UI components are needed and the actions attached to them.
 
 **Network part**:
 
-Should be finished in the ncoming two days because this is the basic part of multiple playing.
+Should be finished in the coming two days because this is the basic part of multiple playing.
 
 ### If not, how will you modify your goals?
 Finish goals with higher priority (build the MVP first before trying to realize additional features)
