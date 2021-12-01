@@ -1,0 +1,1 @@
+--command=stack ghci cse230-while:lib cse230-while:test
