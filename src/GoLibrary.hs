@@ -1,33 +1,28 @@
-module GoLibrary(Game
-    ,Stone
-    ,GoBoard
-    -- createGo,
-    -- runMove,
-    -- runPass,
-    -- isValidMove,
-    -- finishGo,
-    -- getWinner
-) where
+module GoLibrary where
 
-import Data.Map as Map
+import qualified Data.Map as M
 
-
+-- Suppose we have these data structures from logic part exposed to us.
+-- For rules and jargons of Go, please refer to: https://www.britgo.org/intro/intro2.html
+data Point = Point {_i :: Int, _j :: Int} deriving (Ord, Eq)
 
 data Stone = Black | White | Ko | Empty deriving (Eq, Show)
 
-data GoBoard = Map Point Stone
+type GoBoard = M.Map Point Stone
 
 data Move = Pass Stone | Move Point Stone deriving (Eq)
 
-data Game = Game { 
-    board :: GoBoard,
+data Game = Game {board :: GoBoard,
     boardSize :: Int,
     player :: Stone,
     lastMove :: Move,
     scoreBlack :: Int,
     scoreWhite :: Int
 }
-
+-- ------------------------------------------------------------------------------
+-- | Commented out as they are buggy logic part code and not relevant to the    |
+-- | implmentation of the UI part                                               |
+-- ------------------------------------------------------------------------------
 -- -- give size and stone, create the go game. one player initial with black, another initial with white
 -- createGo :: Stone -> Int -> Game
 -- createGo player size = Game{
