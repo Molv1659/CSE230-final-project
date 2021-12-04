@@ -21,8 +21,7 @@ which should build and run the program in the current terminal. Currently, the U
 ### drawing features
 - [x] create seamless division of UI
 - [x] use border to draw go board
-- [ ] draw column/row number of the board
-- [ ] find out how to draw go stone
+- [x] find out how to draw go stone
 - [ ] draw stone dynamically according to the stone state in the logic part
 
 ### events

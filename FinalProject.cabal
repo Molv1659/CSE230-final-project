@@ -24,6 +24,8 @@ executable BrickTest
   build-depends:       base,
                        brick,
                        vty,
-                       containers
+                       containers,
+                       microlens-th,
+                       microlens
   hs-source-dirs:      src
   default-language:    Haskell2010

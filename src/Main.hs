@@ -27,4 +27,13 @@ app = App {
 
 
 main :: IO ()
-main = void $ M.defaultMain app $ getInitialState
+main = do
+    -- enable mouse event
+    let buildVty = do {
+        v <- V.mkVty =<< V.standardIOConfig;
+        V.setMode (V.outputIface v) V.Mouse True;
+        return v;
+    }
+        
+    initialVty <- buildVty
+    void $ M.customMain initialVty buildVty Nothing app $ getInitialState
