@@ -10,6 +10,25 @@ Sicheng Wang
 
 Tianyang Zhou
 
+## UI features [Pengfei Rao, Danling Wang]
+### Run the code
+To run the current version, in your terminal under the root directory of this repo, run
+```bash
+cabal run
+```
+which should build and run the program in the current terminal. Currently, the UI should look something like this:
+![image](pic/EmptyStaticBoard.png)
+### drawing features
+- [x] create seamless division of UI
+- [x] use border to draw go board
+- [x] find out how to draw go stone
+- [ ] draw stone dynamically according to the stone state in the logic part
+
+### events
+- [x] redraw upon event, quit with events other then resize.
+- [ ] Get mouse position and translate them into the location of stones.
+
+
 ## Overview
 We are going to develop a Go game online client program in Haskell. Using our client program, two players can be connected by network to play Go together in a gaming room, where the board and other related information will be shown in a command-line interface built by the Brick library. The software may allow others to join the gaming room and watch the live of the ongoing game, and in order to provide a better experience, onlookers who join halfway can review the game history step by step.
 
