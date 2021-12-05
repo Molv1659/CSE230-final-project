@@ -12,6 +12,8 @@ import Brick
 import Brick.Main
     (resizeOrQuit
     ,getVtyHandle
+    ,continue
+    ,halt
     )
 import Brick.Widgets.Center
     (hCenterWith, centerLayer
@@ -20,20 +22,27 @@ import Brick.Widgets.Core
     (hBox, vBox
     ,hLimit, vLimit
     ,withBorderStyle, joinBorders
+    ,clickable
     )
 import Brick.Widgets.Border
     (vBorder, hBorder, border, joinableBorder)
 import Brick.Widgets.Border.Style
     (unicode)
-
+import qualified Brick.Types as T
 import Lens.Micro.TH (
     makeLenses
     )
 import Lens.Micro (
     over
+    , (^.), (&), (.~), (%~)
     )
 import Graphics.Vty (
     outputIface
+    , Event(..)
+    )
+import Graphics.Vty.Input.Events (
+    Key(..),
+    Button(..)
     )
 import Graphics.Vty.Output.Interface (
     Output(..),
@@ -54,6 +63,9 @@ import GoLibrary as Lib
 
 data Tick = Tick
 
+data ResourceName = Board | OtherResources deriving (Show, Ord, Eq)
+
+
 data PointPattern = BlackStone | WhiteStone | EmptyStone | HandicapPoint
 data PointLoc = TopLeft | TopMid | TopRight | RightMid | BottomRight | BottomMid | BottomLeft | LeftMid | Other
 
@@ -65,7 +77,12 @@ stoneToPointPattern Empty   = EmptyStone
 
 -- The data structure owned by the UI part
 -- Prefix the fields in GameState with underscore "_" to make lenses for it
-data GameState = GameState { _dim::Int, _boardState::Lib.Game, _time::Int, _pointLocMap:: M.Map Lib.Point PointLoc}
+data GameState = GameState { 
+    _dim::Int, 
+    _boardState::Lib.Game, 
+    _time::Int, 
+    _pointLocMap:: M.Map Lib.Point PointLoc,
+    _lastReportedClick :: Maybe (Int, Int)}
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
 -- makeLenses ''Lib.Game
@@ -133,13 +150,14 @@ getInitialState =
             scoreWhite = 0
         },
         _time=0,   -- how many rounds have passed
-        _pointLocMap=buildPointLocMap d  -- locations of black
+        _pointLocMap=buildPointLocMap d,  -- locations of black
+        _lastReportedClick=Nothing
         }
     in s
 
 decidePointLoc :: GameState -> Int -> Int -> PointLoc
-decidePointLoc (GameState d s t m) i j = 
-    let pl = M.lookup (Point i j) m
+decidePointLoc g i j = 
+    let pl = M.lookup (Point i j) (g ^. pointLocMap)
     in case pl of
         Nothing -> Other
         Just loc -> loc
@@ -179,13 +197,12 @@ decidePointPattern g i j =
         EmptyStone
 
 decideBoardDim :: GameState -> Int
-decideBoardDim (GameState d s t m) = d
+decideBoardDim g = g ^. dim
 
-type ResourceName = ()
 
 -- Game Visualizer
 -- the entrance function of drawing
-drawUi :: GameState -> [Widget ()]
+drawUi :: GameState -> [Widget ResourceName]
 drawUi g = [
     vBox [
         drawRoomInfo g
@@ -200,24 +217,25 @@ drawUi g = [
     ]
 
 -- display game room name on the top
-drawRoomInfo :: GameState -> Widget ()
+drawRoomInfo :: GameState -> Widget ResourceName
 drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, hBorder]
 
 -- display player/watchers information on the left panel
-drawPlayerInfo :: GameState -> Widget ()
+drawPlayerInfo :: GameState -> Widget ResourceName
 drawPlayerInfo g = hLimit 30 $ str "Black: " <=> str "White: " <=> str "Other info: number of watchers"
 
 -- draw the current board and other game info using GameState in the middle panel
 -- currently an empty board is drawn using realDrawBoard
-drawBoard :: GameState -> Widget ()
+drawBoard :: GameState -> Widget ResourceName
 drawBoard g = vBox [vLimit 1 $ hCenterWith (Just '-') $ hBox [vBorder, str " Board ", vBorder]
                     ,realDrawBoard g
+                    ,drawLastClick g
                     ,hCenterWith Nothing (str "Round: 0")
                     ]
 
 -- helper function, either draw a stone/empty intersection point
 -- currently only draws empty intersection point
-stoneOrEmpty :: PointPattern -> PointLoc -> Widget ()
+stoneOrEmpty :: PointPattern -> PointLoc -> Widget ResourceName
 stoneOrEmpty BlackStone _           = str {- Large Circle -}"\x25EF"
 stoneOrEmpty HandicapPoint _        = str {- Square position indicator -}"\x2BD0"
 stoneOrEmpty WhiteStone _           = str {- Black Circle for record -}"\x23FA"
@@ -233,7 +251,7 @@ stoneOrEmpty EmptyStone Other       = joinableBorder $ Edges {eTop=True, eBottom
 
 -- helper function, either draw a stone/empty intersection point using `stoneOrEmpty`
 -- deal with rightmost column as they don't need an extra hborder on their right.
-basicGrid :: PointPattern -> PointLoc -> Widget ()
+basicGrid :: PointPattern -> PointLoc -> Widget ResourceName
 basicGrid s l = case l of
     -- the last column needs special treatment
     TopRight -> stoneOrEmpty s l
@@ -245,10 +263,10 @@ basicGrid s l = case l of
     
 
 -- Literally, do the real job to draw the board
-realDrawBoard :: GameState -> Widget ()
+realDrawBoard :: GameState -> Widget ResourceName
 realDrawBoard g = 
     let d = decideBoardDim g
-    in centerLayer $ vBox [
+    in centerLayer $ clickable Board $ vBox [
             hBox [ 
                 (basicGrid (decidePointPattern g i j) (decidePointLoc g i j)) 
                     | j <- [1..d]
@@ -256,14 +274,30 @@ realDrawBoard g =
             | i <- [1..d]
         ]
 
+-- Display the last click position under the board
+drawLastClick :: GameState -> Widget ResourceName
+drawLastClick g = str ("Last Stone was placed at: " ++ (show (g ^. lastReportedClick)))
+
 -- display some game stats on the right panel
-drawGameInfo :: GameState -> Widget ()
+drawGameInfo :: GameState -> Widget ResourceName
 drawGameInfo g = hLimit 30 $ str "Timer / Points / Game Result"
 
 -- display some notification on the bottom panel
-drawNotification :: GameState -> Widget ()
+drawNotification :: GameState -> Widget ResourceName
 drawNotification g = str "Notifications will appear here"
 
+inferCoordinate :: T.Location -> Maybe (Int, Int)
+inferCoordinate (T.Location (col, row)) = 
+    if even col then
+        Just (1 + row , 1 + col `div` 2)
+    else
+        Nothing
+
 -- Game Control: events, currently only handle resize event
-handleEvent :: GameState -> BrickEvent () Tick -> EventM () (Next GameState)
-handleEvent g e = resizeOrQuit g e
+handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
+handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
+    let coord = inferCoordinate loc
+    -- liftIO $ putStrLn (show coord)
+    continue $ g & (lastReportedClick .~ coord)
+handleEvent g (T.VtyEvent (EvKey KEsc [])) = halt g
+handleEvent g e = continue g
