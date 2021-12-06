@@ -24,6 +24,11 @@ dependencies:
 - network
 - network-run
 - bytestring
+- brick
+- vty
+- containers
+- microlens-th
+- microlens
 
 library:
   source-dirs: src
@@ -39,6 +44,19 @@ executables:
     dependencies:
     - CSE230-final-projects
 
+  BrickTest:
+    main:                Main.hs
+    source-dirs:         src
+    other-modules:       GoLibrary,
+                         UI
+    ghc-options:
+    - -threaded
+    - -Wall
+    - -Wcompat
+    - -O2
+    dependencies:
+    - CSE230-final-projects
+
 tests:
   CSE230-final-projects-test:
     main:                Spec.hs
@@ -49,3 +67,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - CSE230-final-projects
+
