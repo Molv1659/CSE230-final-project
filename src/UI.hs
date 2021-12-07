@@ -2,6 +2,7 @@
 
 module UI where
 
+import Prelude as P
 import Brick 
     (Widget, BrickEvent, EventM
     , Edges(..)
@@ -14,6 +15,20 @@ import Brick.Main
     ,getVtyHandle
     ,continue
     ,halt
+    )
+import Brick.Widgets.Edit
+    (Editor
+    ,renderEditor
+    ,handleEditorEvent
+    ,editor
+    ,getEditContents
+    )
+import Brick.Focus
+    (FocusRing
+    ,withFocusRing
+    ,focusGetCurrent
+    ,focusRing
+    ,focusRingCursor
     )
 import Brick.Widgets.Center
     (hCenterWith, centerLayer
@@ -63,11 +78,17 @@ import GoLibrary as Lib
 
 data Tick = Tick
 
-data ResourceName = Board | OtherResources deriving (Show, Ord, Eq)
+data ResourceName = Board | IPField | ConnectButton | OtherResources deriving (Show, Ord, Eq)
 
 
 data PointPattern = BlackStone | WhiteStone | EmptyStone | HandicapPoint
 data PointLoc = TopLeft | TopMid | TopRight | RightMid | BottomRight | BottomMid | BottomLeft | LeftMid | Other
+
+-- Take User Input
+-- data FormFields = IPField deriving (Show, Ord, Eq)
+-- data UserIP = UserIP { _ip :: T.Text } deriving (Show)
+-- generate lens to create corresponding fields
+-- makeLenses ''UserIP
 
 stoneToPointPattern :: Stone -> PointPattern
 stoneToPointPattern Black   = BlackStone
@@ -82,7 +103,12 @@ data GameState = GameState {
     _boardState::Lib.Game, 
     _time::Int, 
     _pointLocMap:: M.Map Lib.Point PointLoc,
-    _lastReportedClick :: Maybe (Int, Int)}
+    _lastReportedClick :: Maybe (Int, Int),
+    _opponentIP :: Editor String ResourceName,
+    _editFocus :: FocusRing ResourceName,
+    _submitIP :: Bool,
+    _notification :: String
+}
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
 -- makeLenses ''Lib.Game
@@ -151,7 +177,11 @@ getInitialState =
         },
         _time=0,   -- how many rounds have passed
         _pointLocMap=buildPointLocMap d,  -- locations of black
-        _lastReportedClick=Nothing
+        _lastReportedClick=Nothing,
+        _opponentIP=(editor IPField Nothing ""),
+        _editFocus=(focusRing [IPField]),
+        _submitIP=False,
+        _notification="Please enter the opponent's IP to start a game."
         }
     in s
 
@@ -212,6 +242,7 @@ drawUi g = [
             ,vBorder
             ,drawGameInfo g
             ]
+        ,hBorder
         ,drawNotification g
         ]
     ]
@@ -222,7 +253,13 @@ drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, 
 
 -- display player/watchers information on the left panel
 drawPlayerInfo :: GameState -> Widget ResourceName
-drawPlayerInfo g = hLimit 30 $ str "Black: " <=> str "White: " <=> str "Other info: number of watchers"
+drawPlayerInfo g = hLimit 30 $ drawEditor g
+                    <=> case g^.submitIP of
+                            False -> drawButton <=> hBorder
+                            _ -> hBorder
+                    <=> str "Black: "
+                    <=> str "White: "
+                    <=> str "Other info: number of watchers"
 
 -- draw the current board and other game info using GameState in the middle panel
 -- currently an empty board is drawn using realDrawBoard
@@ -284,7 +321,7 @@ drawGameInfo g = hLimit 30 $ str "Timer / Points / Game Result"
 
 -- display some notification on the bottom panel
 drawNotification :: GameState -> Widget ResourceName
-drawNotification g = str "Notifications will appear here"
+drawNotification g = str (g^.notification)
 
 inferCoordinate :: T.Location -> Maybe (Int, Int)
 inferCoordinate (T.Location (col, row)) = 
@@ -293,11 +330,32 @@ inferCoordinate (T.Location (col, row)) =
     else
         Nothing
 
+-- TODO: send IP to network and return the result
+connectWithOppo :: GameState -> Bool
+connectWithOppo g = True
+
 -- Game Control: events, currently only handle resize event
 handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
 handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
     let coord = inferCoordinate loc
     -- liftIO $ putStrLn (show coord)
     continue $ g & (lastReportedClick .~ coord)
-handleEvent g (T.VtyEvent (EvKey KEsc [])) = halt g
-handleEvent g e = continue g
+handleEvent g (T.VtyEvent ev) = case ev of
+    (EvKey KEsc []) -> halt g
+    _ -> continue =<< case focusGetCurrent (g^.editFocus) of
+        Just IPField -> T.handleEventLensed g opponentIP handleEditorEvent ev
+        _      -> return g
+handleEvent g (T.MouseDown ConnectButton _ _ _) = do
+    let submitStatus = connectWithOppo g
+    continue $ g & (opponentIP .~ (editor IPField Nothing "")) & (submitIP .~ submitStatus)
+handleEvent g _ = continue g
+
+drawEditor :: GameState -> Widget ResourceName
+drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
+    where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
+
+drawButton :: Widget ResourceName
+drawButton = hCenterWith Nothing (clickable ConnectButton $ border $ str "Connect")
+
+cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
+cursor = focusRingCursor (^.editFocus)

@@ -9,6 +9,7 @@ import UI
     ,Tick
     ,drawUi
     ,handleEvent
+    ,cursor
     )
 import qualified Graphics.Vty as V
 import Control.Monad (void)
@@ -19,7 +20,8 @@ import Control.Monad (void)
 app :: App GameState Tick ResourceName
 app = App {
     appDraw = drawUi,
-    appChooseCursor = M.neverShowCursor,
+    -- appChooseCursor = M.neverShowCursor,
+    appChooseCursor = cursor,
     appHandleEvent = handleEvent,
     appStartEvent = return,
     appAttrMap = const $ attrMap V.defAttr []
