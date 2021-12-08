@@ -83,8 +83,8 @@ import Control.Monad.IO.Class (
     liftIO
     )
 import GoLibrary as Lib
-import qualified Network.Socket as S
 import Data.List as L
+import NetworkInterface
 
 data Tick = Tick
 
@@ -431,22 +431,4 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
 handleEvent g _ = continue g
-
-data EventType = LISTEN | CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
-
-data NetworkRequest = NetworkRequest {
-    _eventType :: EventType,
-    _requestSocket :: Maybe S.Socket,
-    _action :: Either Lib.Point String
-}
-
-makeLenses ''NetworkRequest
-
-data NetworkResponse = NetworkResponse {
-    _result :: Bool,
-    _responseSocket :: Maybe S.Socket,
-    _msg :: String
-}
-
-makeLenses ''NetworkResponse
 

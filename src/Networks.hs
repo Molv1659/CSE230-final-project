@@ -5,24 +5,7 @@ import           Data.ByteString.Char8     as D
 import           Lens.Micro
 import           Network.Socket
 import           Network.Socket.ByteString
-
-
-data EventType = LISTEN | CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
-
-data Point = Point {_i :: Int, _j :: Int}
-                deriving (Ord, Eq)
-
-data NetworkRequest = NetworkRequest {
-    _eventType     :: EventType,
-    _requestSocket :: Maybe Socket,
-    _action        :: Either Point String
-}
-
-data NetworkResponse = NetworkResponse {
-    _result         :: Bool,
-    _responseSocket :: Maybe Socket,
-    _msg            :: String
-}
+import           NetworkInterface
 
 requestHandler :: NetworkRequest -> IO NetworkResponse
 requestHandler (NetworkRequest etype socket (Right action)) = case etype of
@@ -85,5 +68,4 @@ disconnectHandler :: Socket -> String -> IO NetworkResponse
 disconnectHandler sock msg = do
     close sock
     return $ NetworkResponse True (Just sock) "Disconnected"
-
 
