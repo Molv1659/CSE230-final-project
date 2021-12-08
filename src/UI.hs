@@ -31,18 +31,27 @@ import Brick.Focus
     ,focusRingCursor
     )
 import Brick.Widgets.Center
-    (hCenterWith, centerLayer
+    (hCenterWith
+    ,centerLayer
+    ,vCenterWith
     )
 import Brick.Widgets.Core 
     (hBox, vBox
     ,hLimit, vLimit
+    ,hLimitPercent
     ,withBorderStyle, joinBorders
     ,clickable
+    ,strWrap
+    ,emptyWidget
+    ,padRight
+    ,padAll
+    ,padTopBottom
+    ,withBorderStyle
     )
 import Brick.Widgets.Border
-    (vBorder, hBorder, border, joinableBorder)
+    (vBorder, hBorder, border, joinableBorder, borderWithLabel)
 import Brick.Widgets.Border.Style
-    (unicode)
+    (unicode, unicodeRounded, unicodeBold)
 import qualified Brick.Types as T
 import Lens.Micro.TH (
     makeLenses
@@ -176,7 +185,7 @@ getInitialState =
         _opponentIP=(editor IPField Nothing ""),
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
-        _notification="Please enter the opponent's IP to start a game."
+        _notification="Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
         }
     in s
 
@@ -224,21 +233,18 @@ decidePointPattern g i j =
 decideBoardDim :: GameState -> Int
 decideBoardDim g = g ^. dim
 
-
 -- Game Visualizer
 -- the entrance function of drawing
 drawUi :: GameState -> [Widget ResourceName]
 drawUi g = [
     vBox [
-        drawRoomInfo g
-        ,hBox [drawPlayerInfo g
+        hBorder,
+        hBox [drawLeftColumn g
             ,vBorder
             ,drawBoard g
             ,vBorder
             ,drawGameInfo g
             ]
-        ,hBorder
-        ,drawNotification g
         ]
     ]
 
@@ -246,22 +252,30 @@ drawUi g = [
 drawRoomInfo :: GameState -> Widget ResourceName
 drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, hBorder]
 
+-- display IP info and connect/listen buttons
+drawIPInfo :: GameState -> Widget ResourceName
+drawIPInfo g = case g^.submitIP of
+    True -> drawMyIP g <=>
+            str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
+    _    -> vBox [drawMyIP g  
+                ,drawEditor g
+                ,(drawButton ConnectButton "Connect" <+> drawButton ListenButton "Listen")
+                ,hBorder]
+
+-- display some notification on the bottom panel
+drawNotification :: GameState -> Widget ResourceName
+drawNotification g = strWrap (g^.notification)
+
 -- display player/watchers information on the left panel
-drawPlayerInfo :: GameState -> Widget ResourceName
-drawPlayerInfo g = hLimit 30 $ drawMyIP g  
-                    <=> drawEditor g
-                    <=> case g^.submitIP of
-                            False -> drawButton ConnectButton "Connect" <+> drawButton ListenButton "Listen" <=> hBorder
-                            _ -> hBorder
-                    <=> case g ^. boardState ^. player of
-                            Black -> str "Black: myself" <=> str "White: opponent"
-                            _     -> str "Black: opponent" <=> str "White: myself"
-                    <=> str "Other info: number of watchers"
+drawLeftColumn :: GameState -> Widget ResourceName
+drawLeftColumn g = padAll 1 $ hLimit 30 $ vBox [
+                    drawIPInfo g
+                    ,drawNotification g]
 
 -- draw the current board and other game info using GameState in the middle panel
 -- currently an empty board is drawn using realDrawBoard
 drawBoard :: GameState -> Widget ResourceName
-drawBoard g = vBox [vLimit 1 $ hCenterWith (Just '-') $ hBox [vBorder, str " Board ", vBorder]
+drawBoard g = hLimitPercent 65 $ vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
                     ,realDrawBoard g
                     ,drawLastClick g
                     ,hCenterWith Nothing (str "Round: 0")
@@ -312,13 +326,28 @@ realDrawBoard g =
 drawLastClick :: GameState -> Widget ResourceName
 drawLastClick g = str ("Last Stone was placed at: " ++ (show (g ^. lastReportedClick)))
 
--- display some game stats on the right panel
-drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = hLimit 30 $ str "Timer / Points / Game Result"
+-- create border box for player info
+makeBorderBox :: String -> Stone -> Int -> Bool -> Widget ResourceName
+makeBorderBox label stone score isTurn = hCenterWith Nothing $ 
+    case isTurn of
+        True -> withBorderStyle unicodeBold
+        _    -> withBorderStyle unicodeRounded
+    $ borderWithLabel (str label) $
+    hLimit 20 $
+    vLimit 10 $
+    (padAll 1 $ padRight T.Max $
+        vBox [str "Color: " <+> str (show stone)
+            ,str "Score: " <+> str (show score)])
 
--- display some notification on the bottom panel
-drawNotification :: GameState -> Widget ResourceName
-drawNotification g = str (g^.notification)
+-- display some game stats on the right panel
+-- TODO: change black move to dynamic + create timer
+drawGameInfo :: GameState -> Widget ResourceName
+drawGameInfo g = vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: 10:00"
+                     ,case g^.boardState^.player of
+                         Black -> hBox [makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
+                                        ,makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False]
+                         _     -> hBox [makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
+                                        ,makeBorderBox "Opponent" Black (g^.boardState^.scoreBlack) False]]
 
 inferCoordinate :: T.Location -> Maybe (Int, Int)
 inferCoordinate (T.Location (col, row)) = 
@@ -345,10 +374,8 @@ drawMyIP g = do
 
 -- draw opponent ip editor
 drawEditor :: GameState -> Widget ResourceName
-drawEditor g = str "Opponent's IP: " <+> case (g^.submitIP) of
-    True  -> str . unlines $ getEditContents $ g^.opponentIP
-    _     -> (vLimit 1 edit)
-        where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
+drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
+    where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
 
 drawButton :: ResourceName -> String -> Widget ResourceName
 drawButton r s = hCenterWith Nothing (clickable r $ border $ str s)
