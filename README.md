@@ -30,6 +30,7 @@ which should build and run the program in the current terminal. Currently, the U
 - [x] use border to draw go board
 - [x] find out how to draw go stone
 - [ ] draw stone dynamically according to the stone state in the logic part
+- [ ] Network communication
 - [ ] Display score on the "game result" panel on the right
 - [ ] Provide "Pass" button to the board and associate event handler to it
 - [ ] Replace "Player 1" with "You (_color_)" and "Player 2" with "Opponent (_color_)"

@@ -83,7 +83,7 @@ import Control.Monad.IO.Class (
     liftIO
     )
 import GoLibrary as Lib
-
+import qualified Network.Socket as S
 
 data Tick = Tick
 
@@ -181,7 +181,7 @@ defaultBoardSize = 19
 getInitialState :: GameState
 getInitialState = 
     let d = defaultBoardSize
-        stone = Black
+        stone = White
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
@@ -427,3 +427,22 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
 handleEvent g _ = continue g
+
+data EventType = CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
+
+data NetworkRequest = NetworkRequest {
+    _eventType :: EventType,
+    _requestSocket :: Maybe S.Socket,
+    _action :: Either Lib.Point String
+}
+
+makeLenses ''NetworkRequest
+
+data NetworkResponse = NetworkResponse {
+    _result :: Bool,
+    _responseSocket :: Maybe S.Socket,
+    _msg :: String
+}
+
+makeLenses ''NetworkResponse
+
