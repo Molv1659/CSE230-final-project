@@ -8,22 +8,8 @@
     in UI Pass button: first use isValidMove to check, if yes then runPass, then use checkTwoPass to 
     see whether the game should end, if yes, use finishGo to calculate the scores and getWinner
 -}
-module GoLibrary(
-    Point(Point),
-    Stone(Black, White, Ko, Empty),
-    GoBoard,
-    Move(Pass, Move),
-    Game(Game),
-    createGo,
-    isValidMove,
-    runMove,
-    isValidPass,
-    runPass,
-    checkTwoPass,   
-    finishGo,
-    getWinner
-) where
 
+module GoLibrary where
 
 import qualified Data.Map as Map
 import qualified Data.List as List
@@ -118,16 +104,17 @@ isValidMove :: Game -> Point -> Stone -> String
 isValidMove game@(Game b bz pl lm mh sb sw) point stone 
     | not ((stone == turnPlayer game) && (stone == pl)) = "Not your turn."
     | Map.findWithDefault Empty point b /= Empty        = "Please put the stone on empty place."
-    | length (findDead game point stone) == 0           = "True"
+    | length (findDead temp_game point stone) == 0      = "True"
     | length removeAll /= 0                             = "True"
     | otherwise                                         = "You cannot put stone here. You're turning your stones into prisoners!"
     where
         removeAll   = removeUp ++ removeDown ++ removeLeft ++ removeRight
-        removeUp    = findDead game (upPoint point) prison_stone 
-        removeDown  = findDead game (downPoint point) prison_stone
-        removeLeft  = findDead game (leftPoint point) prison_stone
-        removeRight = findDead game (rightPoint point) prison_stone
+        removeUp    = findDead temp_game (upPoint point) prison_stone 
+        removeDown  = findDead temp_game (downPoint point) prison_stone
+        removeLeft  = findDead temp_game (leftPoint point) prison_stone
+        removeRight = findDead temp_game (rightPoint point) prison_stone
         prison_stone = getOppositeStone stone
+        temp_game = putStone game point stone
 
 isValidPass :: Game -> Stone ->String
 isValidPass game@(Game b bz pl lm mh sb sw) stone
