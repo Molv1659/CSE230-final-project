@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module GoLibrary(
     Point(Point),
     Stone(Black, White, Ko, Empty),
@@ -18,7 +20,15 @@ module GoLibrary(
 import qualified Data.Map as Map
 import qualified Data.List as List
 
-data Point = Point Int Int 
+import Lens.Micro.TH (
+    makeLenses
+    )
+import Lens.Micro (
+    over
+    , (^.), (&), (.~), (%~)
+    )
+
+data Point = Point {_i :: Int, _j :: Int}
                 deriving (Ord, Eq)
 
 data Stone = Black | White | Ko | Empty 
@@ -30,25 +40,27 @@ data Move = Pass Stone | Move Point Stone
                 deriving (Eq)
 
 data Game = Game { 
-    board :: GoBoard,
-    boardSize :: Int,
-    player :: Stone,
-    lastMove :: Move,
-    moveHistory :: [Move],
-    scoreBlack :: Int,
-    scoreWhite :: Int
+    _board :: GoBoard,
+    _boardSize :: Int,
+    _player :: Stone,
+    _lastMove :: Move,
+    _moveHistory :: [Move],
+    _scoreBlack :: Int,
+    _scoreWhite :: Int
 }
 
+makeLenses ''Point
+makeLenses ''Game
 -- give size and stone, create the go game. one player initial with black, another initial with white
 createGo :: Stone -> Int -> Game
 createGo this_player size = Game{
-    board = putStones' Map.empty points Empty,
-    boardSize = size,
-    player = this_player,
-    lastMove = Pass White,
-    moveHistory = [],
-    scoreBlack = 0,
-    scoreWhite = 0
+    _board = putStones' Map.empty points Empty,
+    _boardSize = size,
+    _player = this_player,
+    _lastMove = Pass White,
+    _moveHistory = [],
+    _scoreBlack = 0,
+    _scoreWhite = 0
 } where points = [(Point x y) | x <- [1..size], y <- [1..size]]
 
 -- get the go board
@@ -74,13 +86,13 @@ runMove game point stone = removePrisoners (putStone (unlabelAllKo game) point s
 -- player use pass to show he/she think no more scores can be get
 runPass :: Game -> Stone -> Game
 runPass game@(Game b bz pl lm mh sb sw) stone = Game{
-    board = b,
-    boardSize = bz,
-    player = pl,
-    lastMove = Pass stone,
-    moveHistory = mh ++ [Pass stone],
-    scoreBlack = if stone == Black then sb else (sb + 1),
-    scoreWhite = if stone == White then sw else (sw + 1)
+    _board = b,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = Pass stone,
+    _moveHistory = mh ++ [Pass stone],
+    _scoreBlack = if stone == Black then sb else (sb + 1),
+    _scoreWhite = if stone == White then sw else (sw + 1)
 }
 
 -- check whether a move is valid
@@ -102,13 +114,13 @@ isValidMove game@(Game b bz pl lm mh sb sw) point stone
 -- after both player used pass, the game end, use finishGo to count scores
 finishGo :: Game -> Game
 finishGo game@(Game b bz pl lm mh sb sw) = Game {
-    board = b,
-    boardSize = bz,
-    player = pl,
-    lastMove = lm,
-    moveHistory = mh,
-    scoreBlack = sb + blackTerritory,
-    scoreWhite = sw + whiteTerritory
+    _board = b,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = lm,
+    _moveHistory = mh,
+    _scoreBlack = sb + blackTerritory,
+    _scoreWhite = sw + whiteTerritory
 } where (blackTerritory, whiteTerritory) = countTerritory game
 
 -- after finishGo, use getWinner
@@ -160,51 +172,57 @@ rightPoint (Point x y) = Point x (y+1)
 
 putStone :: Game -> Point -> Stone -> Game
 putStone game@(Game b bz pl lm mh sb sw) point stone = Game{
-    board = putStone' b point stone,
-    boardSize = bz,
-    player = pl,
-    lastMove = Move point stone,
-    moveHistory = mh ++ [Move point stone],
-    scoreBlack = sb,
-    scoreWhite = sw
+    _board = putStone' b point stone,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = Move point stone,
+    _moveHistory = mh ++ [Move point stone],
+    _scoreBlack = sb,
+    _scoreWhite = sw
 }
 
 removeStone :: Game -> Point -> Game
-removeStone game@(Game b bz pl lm mh sb sw) point = Game{
-    board = putStone' b point Empty,
-    boardSize = bz,
-    player = pl,
-    lastMove = lm,
-    moveHistory = mh,
-    scoreBlack = sb,
-    scoreWhite = sw
-}
+removeStone game point = (_board .~ (putStone' b point Empty)) game
+-- removeStone game@(Game b bz pl lm mh sb sw) point = Game{
+--     _board = putStone' b point Empty,
+--     _boardSize = bz,
+--     _player = pl,
+--     _lastMove = lm,
+--     _moveHistory = mh,
+--     _scoreBlack = sb,
+--     _scoreWhite = sw
+-- }
+
+
 
 removeStones :: Game -> [Point] -> Game
 removeStones game []      = game
 removeStones game (p:ps) = removeStones (removeStone game p) ps
 
 labelKo :: Game -> Point -> Game
-labelKo game@(Game b bz pl lm mh sb sw) point = Game{
-    board = putStone' b point Ko,
-    boardSize = bz,
-    player = pl,
-    lastMove = lm,
-    moveHistory = mh,
-    scoreBlack = sb,
-    scoreWhite = sw
-}
+labelKo game point = (_board .~ (putStone' b point Ko)) game
+-- labelKo game@(Game b bz pl lm mh sb sw) point = Game{
+--     _board = putStone' b point Ko,
+--     _boardSize = bz,
+--     _player = pl,
+--     _lastMove = lm,
+--     _moveHistory = mh,
+--     _scoreBlack = sb,
+--     _scoreWhite = sw
+-- }
 
 unlabelAllKo :: Game -> Game
-unlabelAllKo game@(Game b bz pl lm mh sb sw)= Game{
-    board = if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty,
-    boardSize = bz,
-    player = pl,
-    lastMove = lm,
-    moveHistory = mh,
-    scoreBlack = sb,
-    scoreWhite = sw
-} where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
+unlabelAllKo game = (_board .~ (if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty)) game
+    where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
+-- unlabelAllKo game@(Game b bz pl lm mh sb sw)= Game{
+--     _board = if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty,
+--     _boardSize = bz,
+--     _player = pl,
+--     _lastMove = lm,
+--     _moveHistory = mh,
+--     _scoreBlack = sb,
+--     _scoreWhite = sw
+-- } where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
 
 
 putStone' :: GoBoard -> Point -> Stone -> GoBoard
