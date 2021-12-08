@@ -109,8 +109,8 @@ checkTwoPass game@(Game b bz pl lm mh sb sw) = ((getPassNum mh)== 2)
 
 getPassNum :: [Move] -> Int
 getPassNum []            = 0
-getPassNum (Pass _):ms   = 1 + getPassNum ms
-getPassNum (Move _ _):ms = getPassNum ms
+getPassNum ((Pass _):ms)   = 1 + getPassNum ms
+getPassNum ((Move _ _):ms) = getPassNum ms
         
 
 -- check whether a move is valid
