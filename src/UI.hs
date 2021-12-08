@@ -428,7 +428,7 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     _ -> continue g
 handleEvent g _ = continue g
 
-data EventType = CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
+data EventType = LISTEN | CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
 
 data NetworkRequest = NetworkRequest {
     _eventType :: EventType,

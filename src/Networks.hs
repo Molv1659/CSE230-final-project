@@ -1,74 +1,89 @@
 module Networks(
-    startServer,
-    echoServer,
-    clientPlayer,
-    serverPlayer
+    requestHandler,
     ) where
-import Control.Concurrent
-import qualified Control.Exception as E
-import qualified Data.ByteString.Char8 as C
-import Control.Monad
-import Network.Socket
-import Network.Socket.ByteString (recv, sendAll)
-import Network.Run.TCP
-{-
-   startServer: Run a TCP server on port 8080
-   It accept an IO action
--}
-startServer :: (Socket -> IO a) -> IO a
-startServer = runTCPServer (Just "0.0.0.0") "8080"
-
-{-
-   Example of a echo server
-   You can use netcat to test it
--}
-echoServer :: IO a
-echoServer = startServer echo
-    where
-        echo s = do
-            message <- recv s 4096
-            putStrLn "Server: "
-            C.putStrLn message
-            sendAll s message
-            echo s
+import           Data.ByteString.Char8     as D
+import           Lens.Micro
+import           Network.Socket
+import           Network.Socket.ByteString
 
 
-{-
-   startClient: Try to connect to a TCP server
-   It accept an IO action after get the connection
--}
-startClient addr = runTCPClient addr "8080"
+data EventType = LISTEN | CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
+
+data Point = Point {_i :: Int, _j :: Int}
+                deriving (Ord, Eq)
+
+data NetworkRequest = NetworkRequest {
+    _eventType     :: EventType,
+    _requestSocket :: Maybe Socket,
+    _action        :: Either Point String
+}
+
+data NetworkResponse = NetworkResponse {
+    _result         :: Bool,
+    _responseSocket :: Maybe Socket,
+    _msg            :: String
+}
+
+requestHandler :: NetworkRequest -> IO NetworkResponse
+requestHandler (NetworkRequest etype socket (Right action)) = case etype of
+    LISTEN -> lisenHandler
+    CONNECT -> connectHandler action
+    SENDDATA -> case socket of
+                Just s -> sendDataHandler s action
+                Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
+    RECVDATA -> case socket of
+                Just s -> recvDataHandler s action
+                Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
+    DISCONNECT -> case socket of
+                Just s -> disconnectHandler s action
+                Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
+
+lisenHandler :: IO NetworkResponse
+lisenHandler = do
+    (socket, addr) <- startServer
+    return $ NetworkResponse True (Just socket) $ "Accpet connection from " ++ show addr
 
 
-{-
-   Example of a client that want to join the game
--}
-clientPlayer :: IO ()
-clientPlayer = startClient "0.0.0.0" join
-    where
-        join s = do
-            sendAll s (C.pack "Hello, I want to join the game!")
-            message <- recv s 4096
-            putStr "Server: "
-            C.putStrLn message
-            join s
+startServer :: IO (Socket, SockAddr)
+startServer = do
+    addr:_ <- getAddrInfo (Just (defaultHints {addrFlags = [AI_PASSIVE]})) (Just "0.0.0.0") (Just "8080")
+    sock <- socket AF_INET Stream 0
+    setSocketOption sock ReuseAddr 1
+    bind sock (addrAddress addr)
+    listen sock 1024
+    accept sock
 
-handleJoin :: (Eq a, Num a) => a -> Socket -> IO ()
-handleJoin num s = do
-    message <- recv s 4096
-    if C.unpack message == "Hello, I want to join the game!"
-        then do
-            if num == 0
-                then do
-                    sendAll s (C.pack "Welcome to the game!")
-                    handleJoin (num + 1) s
-                else do
-                    sendAll s (C.pack "Sorry, the game is full, you can only be the observer")
-    else do
-        sendAll s (C.pack "Message error!")
+startClient :: String -> IO Socket
+startClient addr = do
+    conn:_ <- getAddrInfo (Just (defaultHints {addrFlags = [AI_PASSIVE]})) (Just addr) (Just "8080")
+    sock <- socket AF_INET Stream 0
+    setSocketOption sock ReuseAddr 1
+    connect sock (addrAddress conn)
+    return sock
 
-serverPlayer :: IO ()
-serverPlayer = do
-    let num = 0
-    startServer (handleJoin num)
+connectHandler :: String -> IO NetworkResponse
+connectHandler addr = do
+    socket <- startClient addr
+    return $ NetworkResponse True (Just socket) "Connected"
+
+
+sendData :: Socket -> String -> IO ()
+sendData sock msg = do
+    send sock (pack msg)
+    return ()
+
+sendDataHandler :: Socket -> String -> IO NetworkResponse
+sendDataHandler sock msg = do
+    sendData sock msg
+    return $ NetworkResponse True (Just sock) "Sent"
+
+recvDataHandler :: Socket -> String -> IO NetworkResponse
+recvDataHandler sock msg = do
+    recv sock 2048 >>= \x -> return $ NetworkResponse True (Just sock) (unpack x)
+
+disconnectHandler :: Socket -> String -> IO NetworkResponse
+disconnectHandler sock msg = do
+    close sock
+    return $ NetworkResponse True (Just sock) "Disconnected"
+
 
