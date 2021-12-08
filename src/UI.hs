@@ -347,12 +347,15 @@ handleEvent g (T.VtyEvent ev) = case ev of
         _      -> return g
 handleEvent g (T.MouseDown ConnectButton _ _ _) = do
     let submitStatus = connectWithOppo g
-    continue $ g & (opponentIP .~ (editor IPField Nothing "")) & (submitIP .~ submitStatus)
+    let msg = if submitStatus == True then "Connection Success!" else "Connection Error. Please make sure you entered the correct IP address."
+    continue $ g & (submitIP .~ submitStatus) & (notification .~ msg)
 handleEvent g _ = continue g
 
 drawEditor :: GameState -> Widget ResourceName
-drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
-    where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
+drawEditor g = str "Opponent's IP: " <+> case (g^.submitIP) of
+    True  -> str . unlines $ getEditContents $ g^.opponentIP
+    _     -> (vLimit 1 edit)
+        where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
 
 drawButton :: Widget ResourceName
 drawButton = hCenterWith Nothing (clickable ConnectButton $ border $ str "Connect")
