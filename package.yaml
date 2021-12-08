@@ -24,6 +24,11 @@ dependencies:
 - network
 - network-run
 - bytestring
+- brick
+- vty
+- containers
+- microlens-th
+- microlens
 
 library:
   source-dirs: src
@@ -34,8 +39,9 @@ executables:
     source-dirs:         app
     ghc-options:
     - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+    - -Wall
+    - -Wcompat
+    - -O2
     dependencies:
     - CSE230-final-projects
 
