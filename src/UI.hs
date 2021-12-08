@@ -84,6 +84,7 @@ import Control.Monad.IO.Class (
     )
 import GoLibrary as Lib
 import qualified Network.Socket as S
+import Data.List as L
 
 data Tick = Tick
 
@@ -181,7 +182,7 @@ defaultBoardSize = 19
 getInitialState :: GameState
 getInitialState = 
     let d = defaultBoardSize
-        stone = White
+        stone = Black
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
@@ -204,7 +205,7 @@ decidePointLoc g i j =
         Just loc -> loc
 
 isStone :: PointPattern -> GameState -> Int -> Int -> Bool
-isStone p g i j = case M.lookup (Lib.Point {_i = i, _j = j}) (g ^. boardState ^. board) of
+isStone p g i j = case M.lookup (Lib.Point {Lib._i = i, Lib._j = j}) (g ^. boardState ^. board) of
     Nothing -> False
     Just stone -> stoneToPointPattern stone == p
 
@@ -373,7 +374,7 @@ inferCoordinate (T.Location (col, row)) =
 -- convert a coordinate to the Point type used by logic
 coordToPoint :: Maybe (Int, Int) -> Maybe Lib.Point
 coordToPoint p = case p of
-    Just (i, j) -> Just Lib.Point {_i = i, _j = j}
+    Just (i, j) -> Just Lib.Point {Lib._i = i, Lib._j = j}
     Nothing -> Nothing
 
 -- addNotification :: GameState -> String -> GameState
@@ -406,12 +407,15 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
     case point of
         Nothing -> continue $ g & (lastReportedClick .~ coord)
         Just p -> let {
-                (new_board, result) = Lib.verifyMove (g ^. boardState) p;
-                new_g = (boardState .~ new_board) g  -- set the boardState of GameState
+                game = g ^. boardState;
+                stone = game ^. Lib.player;
+                msg = Lib.isValidMove game p stone;
+                -- new_g = (boardState .~ new_board) g  -- set the boardState of GameState
+                result = (L.isPrefixOf (show True) msg) && (L.isPrefixOf msg (show True))
                 }
             in case result of
-                True -> continue $ new_g & (lastReportedClick .~ coord)
-                False ->  continue $ new_g & (lastReportedClick .~ coord)
+                True -> continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
+                _ ->  continue $ g & (lastReportedClick .~ coord) & (notification .~ msg)
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
