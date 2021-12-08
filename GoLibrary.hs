@@ -1,5 +1,13 @@
 {-# LANGUAGE TemplateHaskell #-}
 
+{-
+    in UI connect: use createGo to initialize the Go game
+
+    in UI click goboard: first use isValidMove to check, if yes use runMove, else show the error string
+
+    in UI Pass button: first use isValidMove to check, if yes then runPass, then use checkTwoPass to 
+    see whether the game should end, if yes, use finishGo to calculate the scores and getWinner
+-}
 module GoLibrary(
     Point(Point),
     Stone(Black, White, Ko, Empty),
@@ -7,15 +15,15 @@ module GoLibrary(
     Move(Pass, Move),
     Game(Game),
     createGo,
-    getBoard,
-    getStone,
-    getMoveHistory,
-    runMove,
-    runPass,
     isValidMove,
+    runMove,
+    isValidPass,
+    runPass,
+    checkTwoPass,   
     finishGo,
     getWinner
 ) where
+
 
 import qualified Data.Map as Map
 import qualified Data.List as List
@@ -95,14 +103,24 @@ runPass game@(Game b bz pl lm mh sb sw) stone = Game{
     _scoreWhite = if stone == White then sw else (sw + 1)
 }
 
+-- after runPass, use checkTwoPass to see whether the game end, if yes, use finishGo to calculate the score and getWinner 
+checkTwoPass :: Game -> Bool
+checkTwoPass game@(Game b bz pl lm mh sb sw) = ((getPassNum mh)== 2)
+
+getPassNum :: [Move] -> Int
+getPassNum []            = 0
+getPassNum (Pass _):ms   = 1 + getPassNum ms
+getPassNum (Move _ _):ms = getPassNum ms
+        
+
 -- check whether a move is valid
-isValidMove :: Game -> Point -> Stone -> Bool
+isValidMove :: Game -> Point -> Stone -> String
 isValidMove game@(Game b bz pl lm mh sb sw) point stone 
-    | not ((stone == turnPlayer game) && (stone == pl)) = False
-    | Map.findWithDefault Empty point b /= Empty             = False
-    | length (findDead game point stone) == 0  = True
-    | length removeAll /= 0                    = True
-    | otherwise                                = False
+    | not ((stone == turnPlayer game) && (stone == pl)) = "Not your turn."
+    | Map.findWithDefault Empty point b /= Empty        = "Please put the stone on empty place."
+    | length (findDead game point stone) == 0           = "True"
+    | length removeAll /= 0                             = "True"
+    | otherwise                                         = "You cannot put stone here. You're turning your stones into prisoners!"
     where
         removeAll   = removeUp ++ removeDown ++ removeLeft ++ removeRight
         removeUp    = findDead game (upPoint point) prison_stone 
@@ -110,6 +128,11 @@ isValidMove game@(Game b bz pl lm mh sb sw) point stone
         removeLeft  = findDead game (leftPoint point) prison_stone
         removeRight = findDead game (rightPoint point) prison_stone
         prison_stone = getOppositeStone stone
+
+isValidPass :: Game -> Stone ->String
+isValidPass game@(Game b bz pl lm mh sb sw) stone
+    | not ((stone == turnPlayer game) && (stone == pl)) = "Not your turn."
+    | otherwise                                         = "True"
 
 -- after both player used pass, the game end, use finishGo to count scores
 finishGo :: Game -> Game
@@ -130,6 +153,10 @@ getWinner game@(Game b bz pl lm mh sb sw)
     | otherwise   = White
 
 
+
+
+
+-----------------------------------------------------------------------------
 turnPlayer :: Game -> Stone
 turnPlayer game@(Game b bz pl lm mh sb sw) = case lm of Pass stone -> getOppositeStone stone
                                                         Move point stone -> getOppositeStone stone
@@ -182,16 +209,16 @@ putStone game@(Game b bz pl lm mh sb sw) point stone = Game{
 }
 
 removeStone :: Game -> Point -> Game
-removeStone game point = (_board .~ (putStone' b point Empty)) game
--- removeStone game@(Game b bz pl lm mh sb sw) point = Game{
---     _board = putStone' b point Empty,
---     _boardSize = bz,
---     _player = pl,
---     _lastMove = lm,
---     _moveHistory = mh,
---     _scoreBlack = sb,
---     _scoreWhite = sw
--- }
+-- removeStone game point = (_board .~ (putStone' b point Empty)) game
+removeStone game@(Game b bz pl lm mh sb sw) point = Game{
+    _board = putStone' b point Empty,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = lm,
+    _moveHistory = mh,
+    _scoreBlack = sb,
+    _scoreWhite = sw
+}
 
 
 
@@ -200,29 +227,29 @@ removeStones game []      = game
 removeStones game (p:ps) = removeStones (removeStone game p) ps
 
 labelKo :: Game -> Point -> Game
-labelKo game point = (_board .~ (putStone' b point Ko)) game
--- labelKo game@(Game b bz pl lm mh sb sw) point = Game{
---     _board = putStone' b point Ko,
---     _boardSize = bz,
---     _player = pl,
---     _lastMove = lm,
---     _moveHistory = mh,
---     _scoreBlack = sb,
---     _scoreWhite = sw
--- }
+-- labelKo game point = (_board .~ (putStone' b point Ko)) game
+labelKo game@(Game b bz pl lm mh sb sw) point = Game{
+    _board = putStone' b point Ko,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = lm,
+    _moveHistory = mh,
+    _scoreBlack = sb,
+    _scoreWhite = sw
+}
 
 unlabelAllKo :: Game -> Game
-unlabelAllKo game = (_board .~ (if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty)) game
-    where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
--- unlabelAllKo game@(Game b bz pl lm mh sb sw)= Game{
---     _board = if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty,
---     _boardSize = bz,
---     _player = pl,
---     _lastMove = lm,
---     _moveHistory = mh,
---     _scoreBlack = sb,
---     _scoreWhite = sw
--- } where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
+-- unlabelAllKo game = (_board .~ (if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty)) game
+--     where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
+unlabelAllKo game@(Game b bz pl lm mh sb sw)= Game{
+    _board = if ko_points == [] then b else putStones' b (fmap fst ko_points) Empty,
+    _boardSize = bz,
+    _player = pl,
+    _lastMove = lm,
+    _moveHistory = mh,
+    _scoreBlack = sb,
+    _scoreWhite = sw
+} where ko_points = List.filter (\(p, s) -> s == Ko) (Map.assocs b)
 
 
 putStone' :: GoBoard -> Point -> Stone -> GoBoard
@@ -311,5 +338,4 @@ countOneDirection game@(Game b bz pl lm mh sb sw) point@(Point x y) (xx, yy) sto
 
 
 
-        
-    
+
