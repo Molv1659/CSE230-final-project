@@ -45,7 +45,7 @@ import Brick.Widgets.Core
     ,emptyWidget
     ,padRight
     ,padAll
-    ,padTopBottom
+    ,padTop
     ,withBorderStyle
     )
 import Brick.Widgets.Border
@@ -87,7 +87,14 @@ import GoLibrary as Lib
 
 data Tick = Tick
 
-data ResourceName = Board | IPField | ConnectButton | ListenButton | OtherResources deriving (Show, Ord, Eq)
+data ResourceName = Board 
+    | IPField 
+    | ConnectButton 
+    | ListenButton
+    | PassButton
+    | ResignButton
+    | OtherResources 
+    deriving (Show, Ord, Eq)
 
 
 data PointPattern = BlackStone | WhiteStone | EmptyStone | HandicapPoint deriving (Eq)
@@ -185,7 +192,7 @@ getInitialState =
         _opponentIP=(editor IPField Nothing ""),
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
-        _notification="Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
+        _notification="Mock Notification"
         }
     in s
 
@@ -255,11 +262,15 @@ drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, 
 -- display IP info and connect/listen buttons
 drawIPInfo :: GameState -> Widget ResourceName
 drawIPInfo g = case g^.submitIP of
-    True -> drawMyIP g <=>
-            str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
-    _    -> vBox [drawMyIP g  
+    True -> drawMyIP g
+            <=> str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
+    _    -> vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
+                ,hCenterWith (Just '-') (str "-")
+                ,drawMyIP g
                 ,drawEditor g
-                ,(drawButton ConnectButton "Connect" <+> drawButton ListenButton "Listen")
+                ,str "\n"
+                ,(drawButton ConnectButton "Connect" <+> padAll 1 (str "OR") <+> drawButton ListenButton "Listen")
+                ,str "\n"
                 ,hBorder]
 
 -- display some notification on the bottom panel
@@ -275,7 +286,7 @@ drawLeftColumn g = padAll 1 $ hLimit 30 $ vBox [
 -- draw the current board and other game info using GameState in the middle panel
 -- currently an empty board is drawn using realDrawBoard
 drawBoard :: GameState -> Widget ResourceName
-drawBoard g = hLimitPercent 65 $ vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
+drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
                     ,realDrawBoard g
                     ,drawLastClick g
                     ,hCenterWith Nothing (str "Round: 0")
@@ -342,12 +353,15 @@ makeBorderBox label stone score isTurn = hCenterWith Nothing $
 -- display some game stats on the right panel
 -- TODO: change black move to dynamic + create timer
 drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: 10:00"
+drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: 10:00"
                      ,case g^.boardState^.player of
-                         Black -> hBox [makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
-                                        ,makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False]
-                         _     -> hBox [makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
-                                        ,makeBorderBox "Opponent" Black (g^.boardState^.scoreBlack) False]]
+                         Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
+                                <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
+                         _     -> makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
+                                <=> makeBorderBox "Opponent" Black (g^.boardState^.scoreBlack) False
+                     ,hCenterWith Nothing $ hLimit 10 $ drawButton PassButton "Pass"
+                     ,hCenterWith Nothing $ hLimit 10 $ drawButton ResignButton "Resign"
+                    ]
 
 inferCoordinate :: T.Location -> Maybe (Int, Int)
 inferCoordinate (T.Location (col, row)) = 
@@ -378,7 +392,7 @@ drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
     where edit = withFocusRing (g^.editFocus) (renderEditor (str . unlines)) (g^.opponentIP)
 
 drawButton :: ResourceName -> String -> Widget ResourceName
-drawButton r s = hCenterWith Nothing (clickable r $ border $ str s)
+drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing $ str s)
 
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
@@ -409,5 +423,7 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
         let msg = if submitStatus == True then "Connection Success!" else "Connection Error. Please make sure you entered the correct IP address."
         continue $ g & (submitIP .~ submitStatus) & (notification .~ msg)
     ListenButton -> continue $ g & (notification .~ "Listening...")
+    PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
+    ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
 handleEvent g _ = continue g
