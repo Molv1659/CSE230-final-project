@@ -18,15 +18,27 @@ cabal run
 ```
 which should build and run the program in the current terminal. Currently, the UI should look something like this:
 ![image](pic/EmptyStaticBoard.png)
+
+### Features that require coop from other parts
+1. [Logic] move verification should return a result type including
+   1. a Bool result
+   2. a String describing the reason, which will be displayed on the notification panel
+
+
 ### drawing features
 - [x] create seamless division of UI
 - [x] use border to draw go board
 - [x] find out how to draw go stone
 - [ ] draw stone dynamically according to the stone state in the logic part
+- [ ] Display score on the "game result" panel on the right
+- [ ] Provide "Pass" button to the board and associate event handler to it
+- [ ] Replace "Player 1" with "You (_color_)" and "Player 2" with "Opponent (_color_)"
+- [ ] Provide Edit box for entering opponent's IP and buttons for connecting to opponents and listening for game requests
+- [ ] (**Advanced**) Add "View history" feature to view previous moves and impacts (basically storing and displaying snapshots of the board for each valid move)
 
 ### events
 - [x] redraw upon event, quit with events other then resize.
-- [ ] Get mouse position and translate them into the location of stones.
+- [x] Get mouse position and translate them into the location of stones.
 
 
 ## Overview

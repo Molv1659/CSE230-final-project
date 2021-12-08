@@ -1,6 +1,15 @@
+{-# LANGUAGE TemplateHaskell #-}
 module GoLibrary where
 
+import Lens.Micro.TH (
+    makeLenses
+    )
+import Lens.Micro (
+    over,
+    (^.)
+    )
 import qualified Data.Map as M
+import qualified Data.Map.Strict as MS
 
 -- Suppose we have these data structures from logic part exposed to us.
 -- For rules and jargons of Go, please refer to: https://www.britgo.org/intro/intro2.html
@@ -12,27 +21,41 @@ type GoBoard = M.Map Point Stone
 
 data Move = Pass Stone | Move Point Stone deriving (Eq)
 
-data Game = Game {board :: GoBoard,
-    boardSize :: Int,
-    player :: Stone,
-    lastMove :: Move,
-    scoreBlack :: Int,
-    scoreWhite :: Int
+data Game = Game {_board :: GoBoard,
+    _boardSize :: Int,
+    _player :: Stone,
+    _lastMove :: Move,
+    _scoreBlack :: Int,
+    _scoreWhite :: Int
 }
+
+makeLenses ''Game
+
+
+-- Mock interface: pretend that we have successfully verified each move, and let UI test the drawing functionality
+verifyMove :: Game -> Point -> (Game, Bool)
+verifyMove g p = 
+    -- insert point into the map
+    let result = True
+    in if result then
+            (\g -> (g, result)) $ over board (MS.insert p (g ^. player)) g
+        else
+            (g, result)
+    
 -- ------------------------------------------------------------------------------
 -- | Commented out as they are buggy logic part code and not relevant to the    |
 -- | implmentation of the UI part                                               |
 -- ------------------------------------------------------------------------------
 -- -- give size and stone, create the go game. one player initial with black, another initial with white
--- createGo :: Stone -> Int -> Game
--- createGo player size = Game{
---     board = putStones' points Empty,
---     boardSize = size,
---     player = player,
---     lastMove = Pass White,
---     scoreBlack = 0,
---     scoreWhite = 0
--- } where points = [(Point x y) | x <- [1..size], y <- [1..size]]
+createGo :: Stone -> Int -> Game
+createGo p size = Game{
+    _board = MS.fromList points,
+    _boardSize = size,
+    _player = p,
+    _lastMove = Pass White,
+    _scoreBlack = 0,
+    _scoreWhite = 0
+} where points = [((Point x y), Empty) | x <- [1..size], y <- [1..size]]
 
 
 -- -- run a move at (x, y), should check validity first

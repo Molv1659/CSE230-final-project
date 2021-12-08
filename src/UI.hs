@@ -51,7 +51,7 @@ import Graphics.Vty.Output.Interface (
 import Lens.Micro.Extras (
     view
     )
-import Data.Map as M
+import qualified Data.Map.Strict as M
 import Control.Monad (
     when
     )
@@ -66,7 +66,7 @@ data Tick = Tick
 data ResourceName = Board | OtherResources deriving (Show, Ord, Eq)
 
 
-data PointPattern = BlackStone | WhiteStone | EmptyStone | HandicapPoint
+data PointPattern = BlackStone | WhiteStone | EmptyStone | HandicapPoint deriving (Eq)
 data PointLoc = TopLeft | TopMid | TopRight | RightMid | BottomRight | BottomMid | BottomLeft | LeftMid | Other
 
 stoneToPointPattern :: Stone -> PointPattern
@@ -106,7 +106,7 @@ makeLenses ''GameState
 --      s & dim %~ (+1)
 
 -- Method 2: Use the `over` for setter, e.g. to set _dim of GameState s to 19
---      over (dim . s) (\_ -> 19)
+--      over dim (\_ -> 19) s
 
 
 -- pointLocMap is used to decide how to render empty intersections on different parts of the board
@@ -141,14 +141,7 @@ getInitialState =
         stone = Black
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
-        _boardState = Game{
-            board = M.empty,
-            boardSize = d,
-            player = stone,
-            lastMove = Pass stone,
-            scoreBlack = 0,
-            scoreWhite = 0
-        },
+        _boardState = createGo stone d,
         _time=0,   -- how many rounds have passed
         _pointLocMap=buildPointLocMap d,  -- locations of black
         _lastReportedClick=Nothing
@@ -162,11 +155,11 @@ decidePointLoc g i j =
         Nothing -> Other
         Just loc -> loc
 
-isBlackStone :: GameState -> Int -> Int -> Bool
-isBlackStone g i j = False -- view (boardState . g)
+isStone :: PointPattern -> GameState -> Int -> Int -> Bool
+isStone p g i j = case M.lookup (Lib.Point {_i = i, _j = j}) (g ^. boardState ^. board) of
+    Nothing -> False
+    Just stone -> stoneToPointPattern stone == p
 
-isWhiteStone :: GameState -> Int -> Int -> Bool
-isWhiteStone g i j = False
 
 isHandiCap :: Int -> Int -> Int -> Bool
 isHandiCap l i j =
@@ -187,9 +180,9 @@ isHandiCap l i j =
 
 decidePointPattern :: GameState -> Int -> Int -> PointPattern
 decidePointPattern g i j = 
-    if isBlackStone g i j then
+    if isStone BlackStone g i j then
         BlackStone
-    else if isWhiteStone g i j then
+    else if isStone WhiteStone g i j then
         WhiteStone
     else if isHandiCap (decideBoardDim g) i j then
         HandicapPoint
@@ -293,11 +286,28 @@ inferCoordinate (T.Location (col, row)) =
     else
         Nothing
 
+-- convert a coordinate to the Point type used by logic
+coordToPoint :: Maybe (Int, Int) -> Maybe Lib.Point
+coordToPoint p = case p of
+    Just (i, j) -> Just Lib.Point {_i = i, _j = j}
+    Nothing -> Nothing
+
+-- addNotification :: GameState -> String -> GameState
+
 -- Game Control: events, currently only handle resize event
 handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
 handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
     let coord = inferCoordinate loc
     -- liftIO $ putStrLn (show coord)
-    continue $ g & (lastReportedClick .~ coord)
+        point = coordToPoint coord
+    case point of
+        Nothing -> continue $ g & (lastReportedClick .~ coord)
+        Just p -> let {
+                (new_board, result) = Lib.verifyMove (g ^. boardState) p;
+                new_g = (boardState .~ new_board) g  -- set the boardState of GameState
+                }
+            in case result of
+                True -> continue $ new_g & (lastReportedClick .~ coord)
+                False ->  continue $ new_g & (lastReportedClick .~ coord)
 handleEvent g (T.VtyEvent (EvKey KEsc [])) = halt g
 handleEvent g e = continue g
