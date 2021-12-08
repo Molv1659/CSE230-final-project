@@ -10,6 +10,38 @@ Sicheng Wang
 
 Tianyang Zhou
 
+## UI features [Pengfei Rao, Danling Wang]
+### Run the code
+To run the current version, in your terminal under the root directory of this repo, run
+```bash
+cabal run
+```
+which should build and run the program in the current terminal. Currently, the UI should look something like this:
+![image](pic/EmptyStaticBoard.png)
+
+### Features that require coop from other parts
+1. [Logic] move verification should return a result type including
+   1. a Bool result
+   2. a String describing the reason, which will be displayed on the notification panel
+
+
+### drawing features
+- [x] create seamless division of UI
+- [x] use border to draw go board
+- [x] find out how to draw go stone
+- [ ] draw stone dynamically according to the stone state in the logic part
+- [ ] Network communication
+- [ ] Display score on the "game result" panel on the right
+- [ ] Provide "Pass" button to the board and associate event handler to it
+- [ ] Replace "Player 1" with "You (_color_)" and "Player 2" with "Opponent (_color_)"
+- [ ] Provide Edit box for entering opponent's IP and buttons for connecting to opponents and listening for game requests
+- [ ] (**Advanced**) Add "View history" feature to view previous moves and impacts (basically storing and displaying snapshots of the board for each valid move)
+
+### events
+- [x] redraw upon event, quit with events other then resize.
+- [x] Get mouse position and translate them into the location of stones.
+
+
 ## Overview
 We are going to develop a Go game online client program in Haskell. Using our client program, two players can be connected by network to play Go together in a gaming room, where the board and other related information will be shown in a command-line interface built by the Brick library. The software may allow others to join the gaming room and watch the live of the ongoing game, and in order to provide a better experience, onlookers who join halfway can review the game history step by step.
 
