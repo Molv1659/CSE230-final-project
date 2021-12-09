@@ -82,12 +82,15 @@ import Control.Monad (
 import Control.Monad.IO.Class (
     liftIO
     )
+import Text.Read (
+    readMaybe
+    )
 import GoLibrary as Lib
 import Data.List as L
 import NetworkInterface
 import Control.Concurrent
 import qualified Network.Socket as S
-import Networks (requestHandler)
+import Networks (requestHandler, getResponseMessage, getResponseStatus)
 
 data Tick = Tick
 
@@ -197,7 +200,8 @@ getInitialState =
         _opponentIP=(editor IPField Nothing ""),
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
-        _notification="Mock Notification"
+        _notification="Mock Notification",
+        _socket=Nothing
         }
     in s
 
@@ -381,6 +385,11 @@ coordToPoint p = case p of
     Just (i, j) -> Just Lib.Point {Lib._i = i, Lib._j = j}
     Nothing -> Nothing
 
+pointToCoord :: Maybe Lib.Point -> Maybe (Int, Int)
+pointToCoord p = case p of
+    Just Lib.Point {Lib._i = i, Lib._j = j} -> Just (i, j)
+    Nothing -> Nothing
+
 -- addNotification :: GameState -> String -> GameState
 -- TODO: send IP to network and return the result
 connectWithOppo :: GameState -> IO NetworkResponse
@@ -409,6 +418,19 @@ addListener :: GameState -> IO NetworkResponse
 addListener g = do
     requestHandler (NetworkRequest LISTEN Nothing (Right ""))
 
+sendPointHandler :: GameState -> Point -> IO NetworkResponse
+sendPointHandler g p = do
+    requestHandler (NetworkRequest SENDDATA (g^.socket) (Left p))
+
+recvPointHandler :: GameState -> IO NetworkResponse
+recvPointHandler g = do
+    requestHandler (NetworkRequest RECVDATA (g^.socket) (Right ""))
+
+unserial :: String -> Point
+unserial str = case (readMaybe str :: Maybe Point) of
+    Just p  -> p
+    Nothing -> error $ "Unserial error on: " ++ str
+
 -- Game Control: events, currently only handle resize event
 handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
 handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
@@ -420,13 +442,20 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
         Just p -> let {
                 game = g ^. boardState;
                 stone = game ^. Lib.player;
-                msg = Lib.isValidMove game p stone;
+                msg' = Lib.isValidMove game p stone;
                 -- new_g = (boardState .~ new_board) g  -- set the boardState of GameState
-                result = (L.isPrefixOf (show True) msg) && (L.isPrefixOf msg (show True))
+                result' = (L.isPrefixOf (show True) msg') && (L.isPrefixOf msg' (show True))
                 }
-            in case result of
-                True -> continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
-                _ ->  continue $ g & (lastReportedClick .~ coord) & (notification .~ msg)
+            in case result' of
+                True -> do
+                    response <- liftIO $ sendPointHandler g p
+                    let submitStatus = response ^. result
+                    if submitStatus == True then
+                        continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
+                    else
+                        continue $ g & (notification .~ "Error on connection!")
+                    startRecving g
+                False -> continue $ g & (notification .~ "Invalid move!")
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
@@ -438,7 +467,10 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
         let submitStatus = response ^. result
         let msg = if submitStatus == True then "Connection Success!" else "Connection Error. Please make sure you entered the correct IP address."
         let socket' = if submitStatus == True then response^.responseSocket else Nothing
+        -- TODO: should become white stone
         continue $ g & (submitIP .~ submitStatus) & (notification .~ msg) & (socket .~ socket')
+
+        startRecving g
     ListenButton -> do
         continue $ g & (notification .~ "Listening...")
         -- TODO: will cause stuck
@@ -450,3 +482,14 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     _ -> continue g
 handleEvent g _ = continue g
 
+startRecving :: GameState -> EventM ResourceName (Next GameState)
+startRecving g = do
+    let game = g ^. boardState;
+    let stone = game ^. Lib.player;
+    response <- liftIO $ recvPointHandler g
+    let submitStatus = getResponseStatus response
+    let p' = unserial $ getResponseMessage response
+    if submitStatus == True then
+        continue $ g & (lastReportedClick .~ (pointToCoord (Just p'))) & (boardState .~ (Lib.runMove (g ^. boardState) p' stone))
+    else
+        continue $ g & (notification .~ "Error on connection!")

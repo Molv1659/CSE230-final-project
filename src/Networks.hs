@@ -1,25 +1,35 @@
 module Networks(
     requestHandler,
+    getResponseMessage,
+    getResponseStatus
     ) where
 import qualified Control.Exception         as E
 import           Data.ByteString.Char8     as D
+import           GoLibrary
 import           Lens.Micro
 import           Network.Socket
 import           Network.Socket.ByteString
 import           NetworkInterface
 
 requestHandler :: NetworkRequest -> IO NetworkResponse
-requestHandler (NetworkRequest etype socket (Right action)) = case etype of
+requestHandler (NetworkRequest etype socket action) = case etype of
     LISTEN -> lisenHandler
-    CONNECT -> connectHandler action
+    CONNECT -> connectHandler ac
+                where
+                    ac = case action of
+                        Left point -> error "should not happen"
+                        Right msg  -> msg
     SENDDATA -> case socket of
-                Just s -> sendDataHandler s action
+                Just s -> sendDataHandler s ac
                 Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
+                where ac = case action of
+                        Left point -> (show point)
+                        Right msg  -> msg
     RECVDATA -> case socket of
-                Just s -> recvDataHandler s action
+                Just s -> recvDataHandler s
                 Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
     DISCONNECT -> case socket of
-                Just s -> disconnectHandler s action
+                Just s -> disconnectHandler s
                 Nothing -> return $ NetworkResponse False (error "No socket") "No socket"
 
 lisenHandler :: IO NetworkResponse
@@ -62,14 +72,20 @@ sendDataHandler :: Socket -> String -> IO NetworkResponse
 sendDataHandler sock msg = do
     result <- E.try (sendData sock msg) :: IO (Either E.SomeException ())
     case result of
-        Left e -> return $ NetworkResponse False Nothing $ show e
+        Left e  -> return $ NetworkResponse False Nothing $ show e
         Right _ -> return $ NetworkResponse True Nothing "Send data success"
 
-recvDataHandler :: Socket -> String -> IO NetworkResponse
-recvDataHandler sock msg = do
+recvDataHandler :: Socket -> IO NetworkResponse
+recvDataHandler sock = do
     recv sock 2048 >>= \x -> return $ NetworkResponse True (Just sock) (unpack x)
 
-disconnectHandler :: Socket -> String -> IO NetworkResponse
-disconnectHandler sock msg = do
+disconnectHandler :: Socket -> IO NetworkResponse
+disconnectHandler sock = do
     close sock
     return $ NetworkResponse True (Just sock) "Disconnected"
+
+getResponseMessage :: NetworkResponse -> String
+getResponseMessage (NetworkResponse _ _ msg) = msg
+
+getResponseStatus :: NetworkResponse -> Bool
+getResponseStatus (NetworkResponse status _ _) = status
