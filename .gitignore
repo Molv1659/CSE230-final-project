@@ -1,3 +1,4 @@
 dist*
 *ghc*
 .vscode
+.stack*
