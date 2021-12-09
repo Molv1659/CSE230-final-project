@@ -24,7 +24,7 @@ makeLenses ''NetworkRequest
 data NetworkResponse = NetworkResponse {
     _result :: Bool,
     _responseSocket :: Maybe S.Socket,
-    _msg :: String
+    _msg :: Either Lib.Point String
 }
 
 makeLenses ''NetworkResponse

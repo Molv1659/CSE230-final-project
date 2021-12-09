@@ -53,6 +53,7 @@ import Brick.Widgets.Border
 import Brick.Widgets.Border.Style
     (unicode, unicodeRounded, unicodeBold)
 import qualified Brick.Types as T
+import Brick.BChan
 import Lens.Micro.TH (
     makeLenses
     )
@@ -77,22 +78,24 @@ import Lens.Micro.Extras (
     )
 import qualified Data.Map.Strict as M
 import Control.Monad (
-    when
+    when, void
     )
 import Control.Monad.IO.Class (
     liftIO
     )
-import Text.Read (
-    readMaybe
-    )
+-- import Text.Read (
+--     readMaybe
+--     )
 import GoLibrary as Lib
 import Data.List as L
 import NetworkInterface
-import Control.Concurrent
+
+import Control.Concurrent (forkIO)
 import qualified Network.Socket as S
 import Networks (requestHandler, getResponseMessage, getResponseStatus)
 
 data Tick = Tick
+type NetworkEvent = (Either NetworkRequest NetworkResponse)
 
 data ResourceName = Board 
     | IPField 
@@ -132,7 +135,11 @@ data GameState = GameState {
     _submitIP :: Bool,
     _notification :: String,
     _myIP :: String,
-    _socket :: Maybe S.Socket
+    _socket :: Maybe S.Socket,
+    _currentRound :: Int,  -- the round used for display,
+    _totalRound :: Int,  -- total number of rounds
+    _snapshots :: [M.Map Lib.Point PointPattern],
+    _channel :: BChan NetworkEvent
 }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -186,10 +193,11 @@ defaultBoardSize :: Int
 defaultBoardSize = 19
 
 -- default state before appStartEvent executes
-getInitialState :: GameState
-getInitialState = 
+getInitialState :: BChan NetworkEvent -> GameState
+getInitialState chan = 
     let d = defaultBoardSize
         stone = Black
+        points = [((Point x y), EmptyStone) | x <- [1..d], y <- [1..d]]
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
@@ -201,7 +209,11 @@ getInitialState =
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
         _notification="Mock Notification",
-        _socket=Nothing
+        _socket=Nothing,
+        _currentRound=0,
+        _totalRound=0,
+        _snapshots=[M.fromList points],
+        _channel=chan
         }
     in s
 
@@ -213,9 +225,9 @@ decidePointLoc g i j =
         Just loc -> loc
 
 isStone :: PointPattern -> GameState -> Int -> Int -> Bool
-isStone p g i j = case M.lookup (Lib.Point {Lib._i = i, Lib._j = j}) (g ^. boardState ^. board) of
+isStone p g i j = case M.lookup (Lib.Point {_i = i, _j = j}) ((g ^. snapshots) !! (g ^. currentRound)) of
     Nothing -> False
-    Just stone -> stoneToPointPattern stone == p
+    Just stone -> stone == p
 
 
 isHandiCap :: Int -> Int -> Int -> Bool
@@ -273,7 +285,7 @@ drawIPInfo :: GameState -> Widget ResourceName
 drawIPInfo g = case g^.submitIP of
     True -> drawMyIP g
             <=> str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
-    _    -> vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
+    _    -> vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game. Note that clicking Connect will set your color to white. Player who wants to play black should click Listen instead of Connect."
                 ,hCenterWith (Just '-') (str "-")
                 ,drawMyIP g
                 ,drawEditor g
@@ -284,7 +296,7 @@ drawIPInfo g = case g^.submitIP of
 
 -- display some notification on the bottom panel
 drawNotification :: GameState -> Widget ResourceName
-drawNotification g = strWrap (g^.notification)
+drawNotification g = vBox [strWrap "Notification", strWrap (g^.notification)]
 
 -- display player/watchers information on the left panel
 drawLeftColumn :: GameState -> Widget ResourceName
@@ -298,8 +310,15 @@ drawBoard :: GameState -> Widget ResourceName
 drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
                     ,realDrawBoard g
                     ,drawLastClick g
-                    ,hCenterWith Nothing (str "Round: 0")
+                    ,printRounds g
+                    -- ,printMoveResults g
                     ]
+
+printRounds :: GameState -> Widget ResourceName
+printRounds g = hCenterWith Nothing (vBox[
+    hCenterWith Nothing $ str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show ((P.length (g ^. snapshots)) - 1)
+    , hCenterWith Nothing $ str "Tip: Use Left/Right Key to view history"
+    ])
 
 -- helper function, either draw a stone/empty intersection point
 -- currently only draws empty intersection point
@@ -359,10 +378,17 @@ makeBorderBox label stone score isTurn = hCenterWith Nothing $
         vBox [str "Color: " <+> str (show stone)
             ,str "Score: " <+> str (show score)])
 
+getCurrentMove :: GameState -> Lib.Stone
+getCurrentMove g = let
+    move = g^.boardState^.Lib.lastMove
+    in case move of
+        Pass s -> Lib.getOppositeStone s
+        Move _ s -> Lib.getOppositeStone s
+
 -- display some game stats on the right panel
 -- TODO: change black move to dynamic + create timer
 drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: 10:00"
+drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str $ (show $ getCurrentMove g) ++ "'s move: 10:00"
                      ,case g^.boardState^.player of
                          Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
                                 <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
@@ -414,25 +440,37 @@ drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
 
-addListener :: GameState -> IO NetworkResponse
-addListener g = do
-    requestHandler (NetworkRequest LISTEN Nothing (Right ""))
+-- UI: Whether handler can modify currentRound
+canModify :: Int -> Int -> (Int -> Int) -> Bool
+canModify cur lim f = let res = f cur
+    in if res <= lim && res >= 0 then
+        True
+    else
+        False
 
-sendPointHandler :: GameState -> Point -> IO NetworkResponse
-sendPointHandler g p = do
-    requestHandler (NetworkRequest SENDDATA (g^.socket) (Left p))
+-- UI: generate board snapshot for storage
+getStonesList :: GameState -> [(Point, PointPattern)]
+getStonesList g = 
+    foldl (\l node -> l ++ [(fst node, stoneToPointPattern (snd node))]
+        ) [] $ M.toList (g ^. boardState ^. Lib.board)
 
-recvPointHandler :: GameState -> IO NetworkResponse
-recvPointHandler g = do
-    requestHandler (NetworkRequest RECVDATA (g^.socket) (Right ""))
-
-unserial :: String -> Point
-unserial str = case (readMaybe str :: Maybe Point) of
-    Just p  -> p
-    Nothing -> error $ "Unserial error on: " ++ str
+processMove :: GameState -> Lib.Point -> Lib.Stone -> GameState
+processMove g p stone = 
+    let coord = Just (p^.Lib.i, p^.Lib.j)
+    in g 
+    & (lastReportedClick .~ coord) 
+    & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
+    & (totalRound %~ (+1)) 
+    & (currentRound %~ if (g^.totalRound) == (g^.currentRound) then
+            (+) 1
+        else
+            (+) 0
+        )
+    & (\new_g -> new_g & snapshots %~ (++ [M.fromList $ getStonesList new_g]))
 
 -- Game Control: events, currently only handle resize event
-handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
+-- handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
+handleEvent :: GameState -> BrickEvent ResourceName NetworkEvent -> EventM ResourceName (Next GameState)
 handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
     let coord = inferCoordinate loc
     -- liftIO $ putStrLn (show coord)
@@ -443,53 +481,93 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
                 game = g ^. boardState;
                 stone = game ^. Lib.player;
                 msg' = Lib.isValidMove game p stone;
-                -- new_g = (boardState .~ new_board) g  -- set the boardState of GameState
                 result' = (L.isPrefixOf (show True) msg') && (L.isPrefixOf msg' (show True))
                 }
             in case result' of
                 True -> do
-                    response <- liftIO $ sendPointHandler g p
-                    let submitStatus = response ^. result
-                    if submitStatus == True then
-                        continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
-                    else
-                        continue $ g & (notification .~ "Error on connection!")
-                    startRecving g
+                    _ <- (liftIO $ do
+                        writeBChan (g ^. channel) (P.Left $ NetworkRequest {_eventType=SENDDATA, _requestSocket=g^.socket,_action=Left p}))
+                    continue $ processMove g p stone
                 False -> continue $ g & (notification .~ "Invalid move!")
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
+    (EvKey KLeft []) -> continue =<< let f = (-) 1
+        in case canModify (g^.currentRound) (g^.totalRound) f of
+            True -> return $ g 
+                & currentRound %~ f 
+                & (notification .~ "Got Left arrow key pressed")
+            _ -> return $ g 
+    (EvKey KRight []) -> continue =<< let f = (+) 1
+        in case canModify (g^.currentRound) (g^.totalRound) f of
+            True -> return $ g 
+                & currentRound %~ f 
+                & notification .~ "Got Right arrow key pressed"
+            _ -> return $ g 
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
         Just IPField -> T.handleEventLensed g opponentIP handleEditorEvent ev
         _      -> return g
 handleEvent g (T.MouseDown r _ _ _) = case r of
-    ConnectButton -> do
-        response <- liftIO $ connectWithOppo g
-        let submitStatus = response ^. result
-        let msg = if submitStatus == True then "Connection Success!" else "Connection Error. Please make sure you entered the correct IP address."
-        let socket' = if submitStatus == True then response^.responseSocket else Nothing
-        -- TODO: should become white stone
-        continue $ g & (submitIP .~ submitStatus) & (notification .~ msg) & (socket .~ socket')
-
-        startRecving g
+    ConnectButton ->
+        do
+            _ <- liftIO $ do
+                let oppoIP = head (getEditContents (g^.opponentIP))
+                writeBChan (g^.channel) (Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
+            let submitStatus = True
+            continue $ g & (submitIP .~ submitStatus)
     ListenButton -> do
+        -- issue a network request
+        _ <- liftIO $ do
+            writeBChan (g^.channel) (Left $ NetworkRequest {_eventType=LISTEN,_requestSocket=g^.socket,_action=(Right "")})
         continue $ g & (notification .~ "Listening...")
-        -- TODO: will cause stuck
-        response <- liftIO $ addListener g
-        let massage = response ^. msg
-        continue $ g & (notification .~ massage) & (socket .~ response^.responseSocket)
     PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
+-- deal with network requests in the channel
+handleEvent g (T.AppEvent reqOrResp) = case reqOrResp of
+    Left req -> do
+        new_g <- liftIO $ handleNetworkRequest g req
+        continue $ new_g
+    Right resp -> 
+        do
+            new_g <- liftIO $ handleNetworkResponse g resp
+            case (new_g^.socket) of
+                Nothing -> continue $ new_g
+                Just _ -> do
+                    -- write new recv request to the socket
+                    _ <- liftIO $ do
+                        writeBChan (new_g^.channel) (Left $ NetworkRequest {_eventType=RECVDATA, _requestSocket=new_g^.socket,_action=Right ""})
+                    continue $ new_g
 handleEvent g _ = continue g
 
-startRecving :: GameState -> EventM ResourceName (Next GameState)
-startRecving g = do
-    let game = g ^. boardState;
-    let stone = game ^. Lib.player;
-    response <- liftIO $ recvPointHandler g
-    let submitStatus = getResponseStatus response
-    let p' = unserial $ getResponseMessage response
-    if submitStatus == True then
-        continue $ g & (lastReportedClick .~ (pointToCoord (Just p'))) & (boardState .~ (Lib.runMove (g ^. boardState) p' stone))
-    else
-        continue $ g & (notification .~ "Error on connection!")
+-- ===== Start of AppEvent handlers ====
+-- client will be set to White, and all previous snapshots will be cleared
+maybeChangeColor :: GameState -> NetworkRequest -> GameState
+maybeChangeColor g req =
+    case (req^.eventType) of
+        CONNECT -> g 
+            & (boardState %~ (& Lib.player .~ Lib.White))
+            & (snapshots .~ [(g ^. snapshots) !! 0])
+        _ -> g
+
+
+-- NetworkRequest handler, the entrance function for various requests
+handleNetworkRequest :: GameState -> NetworkRequest -> IO GameState
+handleNetworkRequest g req = do
+    _ <- liftIO $ forkIO $ do {
+        resp <- requestHandler req;
+        writeBChan (g^.channel) (Right resp);
+        }
+    return $ maybeChangeColor g req
+
+handleNetworkResponse :: GameState -> NetworkResponse -> IO GameState
+handleNetworkResponse g resp = do
+    (\new_g -> case (resp^.msg) of
+        Left point ->
+            -- got a move from remote
+            return $ processMove new_g point (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)
+        Right m ->
+            return $ new_g & (notification .~ m)
+        ) 
+    $ g & (socket .~ (resp^.responseSocket)) & (notification .~ "Got new Move from remote")
+
+-- ===== End of AppEvent handlers ====
