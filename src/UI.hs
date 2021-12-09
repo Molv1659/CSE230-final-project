@@ -84,6 +84,7 @@ import Control.Monad.IO.Class (
     )
 import GoLibrary as Lib
 import qualified Network.Socket as S
+import Data.List as L
 
 data Tick = Tick
 
@@ -116,7 +117,7 @@ stoneToPointPattern Empty   = EmptyStone
 -- Prefix the fields in GameState with underscore "_" to make lenses for it
 data GameState = GameState { 
     _dim::Int, 
-    _boardState::Lib.Game, 
+    _boardState :: Lib.Game, 
     _time::Int, 
     _pointLocMap:: M.Map Lib.Point PointLoc,
     _lastReportedClick :: Maybe (Int, Int),
@@ -124,8 +125,10 @@ data GameState = GameState {
     _editFocus :: FocusRing ResourceName,
     _submitIP :: Bool,
     _notification :: String,
-    _myIP :: String
-}
+    _myIP :: String,
+    _currentRound :: Int,  -- the round used for display,
+    _totalRound :: Int  -- total number of rounds
+    }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
 -- makeLenses ''Lib.Game
@@ -181,7 +184,7 @@ defaultBoardSize = 19
 getInitialState :: GameState
 getInitialState = 
     let d = defaultBoardSize
-        stone = White
+        stone = Black
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
@@ -192,7 +195,9 @@ getInitialState =
         _opponentIP=(editor IPField Nothing ""),
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
-        _notification="Mock Notification"
+        _notification="Mock Notification",
+        _currentRound=0,
+        _totalRound=0
         }
     in s
 
@@ -263,7 +268,7 @@ drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, 
 drawIPInfo :: GameState -> Widget ResourceName
 drawIPInfo g = case g^.submitIP of
     True -> drawMyIP g
-            <=> str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
+            <=> (str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)) <=> hBorder
     _    -> vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
                 ,hCenterWith (Just '-') (str "-")
                 ,drawMyIP g
@@ -275,7 +280,7 @@ drawIPInfo g = case g^.submitIP of
 
 -- display some notification on the bottom panel
 drawNotification :: GameState -> Widget ResourceName
-drawNotification g = strWrap (g^.notification)
+drawNotification g = vBox [strWrap "Notification", strWrap (g^.notification)]
 
 -- display player/watchers information on the left panel
 drawLeftColumn :: GameState -> Widget ResourceName
@@ -289,8 +294,15 @@ drawBoard :: GameState -> Widget ResourceName
 drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
                     ,realDrawBoard g
                     ,drawLastClick g
-                    ,hCenterWith Nothing (str "Round: 0")
+                    ,printRounds g
+                    -- ,printMoveResults g
                     ]
+
+printRounds :: GameState -> Widget ResourceName
+printRounds g = hCenterWith Nothing (str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show (g ^. totalRound))
+
+-- After validate move, display hints from logic for invalid move
+-- printMoveResults :: GameState -> Widget
 
 -- helper function, either draw a stone/empty intersection point
 -- currently only draws empty intersection point
@@ -406,12 +418,15 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
     case point of
         Nothing -> continue $ g & (lastReportedClick .~ coord)
         Just p -> let {
-                (new_board, result) = Lib.verifyMove (g ^. boardState) p;
-                new_g = (boardState .~ new_board) g  -- set the boardState of GameState
+                game = g ^. boardState;
+                stone = game ^. Lib.player;
+                msg = Lib.isValidMove game p stone;
+                -- new_g = (boardState .~ new_board) g  -- set the boardState of GameState
+                result = (L.isPrefixOf (show True) msg) && (L.isPrefixOf msg (show True))
                 }
             in case result of
-                True -> continue $ new_g & (lastReportedClick .~ coord)
-                False ->  continue $ new_g & (lastReportedClick .~ coord)
+                True -> continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone)) & (totalRound %~ (+1)) & (currentRound %~ (+1))
+                _ ->  continue $ g & (lastReportedClick .~ coord) & (notification .~ msg)
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
