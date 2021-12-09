@@ -95,15 +95,17 @@ sendDataHandler sock msg = do
 deserialize :: String -> Either Point String
 deserialize point_string = case (readMaybe point_string:: Maybe Point) of
     Just p  -> Left p
-    Nothing -> Right $ "Point parser error on for unpacked string: " ++ point_string ++ ", length: " ++ (show (length point_string))
+    Nothing -> case length point_string of
+                 0 -> Right "Connection closed by peer user"
+                 _ -> Right $ "Point parser error on for unpacked string: " ++ point_string ++ ", length: " ++ (show (length point_string))
 
 recvDataHandler :: Socket -> IO NetworkResponse
 recvDataHandler sock = do
     recv sock 2048 >>= \x -> 
         let point_or_str = deserialize $ unpack x
         in return $ NetworkResponse{
-            _result=True,
-            _responseSocket=Just sock,
+            _result= point_or_str /= Right "Connection closed by peer user",
+            _responseSocket=if point_or_str == Right "Connection closed by peer user" then Nothing else Just sock,
             _msg=point_or_str}
 
 disconnectHandler :: Socket -> IO NetworkResponse
