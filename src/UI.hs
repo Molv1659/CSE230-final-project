@@ -308,10 +308,9 @@ drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, h
 
 printRounds :: GameState -> Widget ResourceName
 printRounds g = hCenterWith Nothing (vBox[
-    str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show (g ^. totalRound)
-    , str "Tip: Use Left/Right Key to view history"
-    ]
-    )
+    hCenterWith Nothing $ str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show (g ^. totalRound)
+    , hCenterWith Nothing $ str "Tip: Use Left/Right Key to view history"
+    ])
 
 -- After validate move, display hints from logic for invalid move
 -- printMoveResults :: GameState -> Widget
