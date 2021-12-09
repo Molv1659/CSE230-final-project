@@ -84,7 +84,8 @@ import Control.Monad.IO.Class (
     )
 import GoLibrary as Lib
 import qualified Network.Socket as S
-import Data.List as L
+import qualified Data.List as L
+import qualified Brick.Widgets.List as BL
 
 data Tick = Tick
 
@@ -127,7 +128,8 @@ data GameState = GameState {
     _notification :: String,
     _myIP :: String,
     _currentRound :: Int,  -- the round used for display,
-    _totalRound :: Int  -- total number of rounds
+    _totalRound :: Int,  -- total number of rounds
+    _snapshots :: [M.Map Lib.Point PointPattern]
     }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -185,6 +187,7 @@ getInitialState :: GameState
 getInitialState = 
     let d = defaultBoardSize
         stone = Black
+        points = [((Point x y), EmptyStone) | x <- [1..d], y <- [1..d]]
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
@@ -197,7 +200,8 @@ getInitialState =
         _submitIP=False,
         _notification="Mock Notification",
         _currentRound=0,
-        _totalRound=0
+        _totalRound=0,
+        _snapshots=[M.fromList points]
         }
     in s
 
@@ -209,9 +213,9 @@ decidePointLoc g i j =
         Just loc -> loc
 
 isStone :: PointPattern -> GameState -> Int -> Int -> Bool
-isStone p g i j = case M.lookup (Lib.Point {_i = i, _j = j}) (g ^. boardState ^. board) of
+isStone p g i j = case M.lookup (Lib.Point {_i = i, _j = j}) ((g ^. snapshots) !! (g ^. currentRound)) of
     Nothing -> False
-    Just stone -> stoneToPointPattern stone == p
+    Just stone -> stone == p
 
 
 isHandiCap :: Int -> Int -> Int -> Bool
@@ -299,7 +303,11 @@ drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, h
                     ]
 
 printRounds :: GameState -> Widget ResourceName
-printRounds g = hCenterWith Nothing (str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show (g ^. totalRound))
+printRounds g = hCenterWith Nothing (vBox[
+    str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show (g ^. totalRound)
+    , str "Tip: Use Left/Right Key to view history"
+    ]
+    )
 
 -- After validate move, display hints from logic for invalid move
 -- printMoveResults :: GameState -> Widget
@@ -409,6 +417,24 @@ drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
 
+getStonesList :: GameState -> [(Point, PointPattern)]
+getStonesList g = 
+    foldl (\l node -> l ++ [(fst node, stoneToPointPattern (snd node))]
+        ) [] $ M.toList (g ^. boardState ^. Lib.board)
+    -- M.foldlWithKey (\l k b -> 
+    -- if b == Lib.Black || b == Lib.White then
+    --     l ++ [(k, stoneToPointPattern b)]
+    -- else
+    --     l
+    -- ) [] (g ^. boardState ^. Lib.board)
+
+canModify :: Int -> Int -> (Int -> Int) -> Bool
+canModify cur lim f = let res = f cur
+    in if res <= lim && res >= 0 then
+        True
+    else
+        False
+
 -- Game Control: events, currently only handle resize event
 handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
 handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
@@ -425,10 +451,24 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
                 result = (L.isPrefixOf (show True) msg) && (L.isPrefixOf msg (show True))
                 }
             in case result of
-                True -> continue $ g & (lastReportedClick .~ coord) & (boardState .~ (Lib.runMove (g ^. boardState) p stone)) & (totalRound %~ (+1)) & (currentRound %~ (+1))
+                True -> continue $ g
+                    & (lastReportedClick .~ coord) 
+                    & (boardState .~ (Lib.runMove (g ^. boardState) p stone)) 
+                    & (totalRound %~ (+1)) & (currentRound %~ (+1))
+                    & (\new_g -> new_g & snapshots %~ (++ [M.fromList $ getStonesList new_g]))
                 _ ->  continue $ g & (lastReportedClick .~ coord) & (notification .~ msg)
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
+    (EvKey KLeft []) -> continue =<<
+        let f = (-) 1
+        in case canModify (g^.currentRound) (g^.totalRound) f of
+            True -> return (g & currentRound %~ f)
+            _ -> return g
+    (EvKey KRight []) -> continue =<<
+        let f = (+) 1
+        in case canModify (g^.currentRound) (g^.totalRound) f of
+            True -> return (g & currentRound %~ f)
+            _ -> return g
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
         Just IPField -> T.handleEventLensed g opponentIP handleEditorEvent ev
         _      -> return g
@@ -441,6 +481,8 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
+handleEvent g (T.AppEvent e) = do
+    continue $ g & (notification .~ "AppEvent generated")
 handleEvent g _ = continue g
 
 data EventType = CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
