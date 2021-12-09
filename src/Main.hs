@@ -3,14 +3,11 @@ module Main where
 import Brick 
     (App(..), attrMap
     )
+import Brick.BChan
+import Control.Monad (void, forever)
+import Control.Concurrent (threadDelay, forkIO)
 import qualified Brick.Main as M
-import UI 
-    (GameState, ResourceName, getInitialState
-    ,Tick
-    ,drawUi
-    ,handleEvent
-    ,cursor
-    )
+import UI
 import qualified Graphics.Vty as V
 import Control.Monad (void)
 
@@ -36,6 +33,12 @@ main = do
         V.setMode (V.outputIface v) V.Mouse True;
         return v;
     }
+
+    chan <- newBChan 10
+
+    void $ forkIO $ forever $ do
+        writeBChan chan Tick
+        threadDelay 1000000
         
     initialVty <- buildVty
-    void $ M.customMain initialVty buildVty Nothing app $ getInitialState
+    void $ M.customMain initialVty buildVty (Just chan) app $ getInitialState

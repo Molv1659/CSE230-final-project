@@ -129,7 +129,9 @@ data GameState = GameState {
     _myIP :: String,
     _currentRound :: Int,  -- the round used for display,
     _totalRound :: Int,  -- total number of rounds
-    _snapshots :: [M.Map Lib.Point PointPattern]
+    _snapshots :: [M.Map Lib.Point PointPattern],
+    _timer :: (Int, Int), -- countdown timer
+    _timeIsUp :: Bool
     }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -201,7 +203,9 @@ getInitialState =
         _notification="Mock Notification",
         _currentRound=0,
         _totalRound=0,
-        _snapshots=[M.fromList points]
+        _snapshots=[M.fromList points],
+        _timer=(10, 0),
+        _timeIsUp=False
         }
     in s
 
@@ -373,8 +377,8 @@ makeBorderBox label stone score isTurn = hCenterWith Nothing $
 -- display some game stats on the right panel
 -- TODO: change black move to dynamic + create timer
 drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: 10:00"
-                     ,case g^.boardState^.player of
+drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move: " <+> drawCounter g
+                     ,case g^.boardState^.player of 
                          Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
                                 <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
                          _     -> makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
@@ -413,6 +417,18 @@ drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
 
 drawButton :: ResourceName -> String -> Widget ResourceName
 drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing $ str s)
+
+drawCounter :: GameState -> Widget ResourceName
+drawCounter g = do
+    let (minute, sec) = g^.timer
+    if sec < 10 && minute < 10
+        then str $ "0" <> (show minute) <> ":" <> "0" <> (show sec)
+    else if minute < 10
+        then str $ "0" <> (show minute) <> ":" <> (show sec)
+    else if sec < 10
+        then str $ (show minute) <> ":" <> "0" <> (show sec)
+    else str $ (show minute) <> ":" <> (show sec)
+    
 
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
@@ -456,6 +472,7 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
                     & (boardState .~ (Lib.runMove (g ^. boardState) p stone)) 
                     & (totalRound %~ (+1)) & (currentRound %~ (+1))
                     & (\new_g -> new_g & snapshots %~ (++ [M.fromList $ getStonesList new_g]))
+                    & (timeIsUp .~ True) -- tells timer to reset
                 _ ->  continue $ g & (lastReportedClick .~ coord) & (notification .~ msg)
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
@@ -481,8 +498,16 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
     PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
-handleEvent g (T.AppEvent e) = do
-    continue $ g & (notification .~ "AppEvent generated")
+handleEvent g (T.AppEvent Tick) = do
+    let (minute, sec) = g^.timer
+    
+    if (g^.timeIsUp || not (g^.submitIP))
+        then continue $ g & (timer .~ (10,0))
+    else if minute == 0 && sec == 0
+        then continue $ g & (timeIsUp .~ True) & (notification .~ "Time is up! Switching to opponent...") -- TODO: switch to opponent and set timeisup to false
+    else if minute > 0 && sec == 0
+        then continue $ g & (timer .~ (minute-1,59)) & (notification .~ "AppEvent generated")
+    else continue $ g & (timer .~ (minute, sec-1)) & (notification .~ "AppEvent generated")
 handleEvent g _ = continue g
 
 data EventType = CONNECT | SENDDATA | RECVDATA | DISCONNECT deriving (Eq, Ord)
