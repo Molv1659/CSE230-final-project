@@ -3,12 +3,12 @@
 module UI where
 
 import Prelude as P
-import Brick 
+import Brick
     (Widget, BrickEvent, EventM
     , Edges(..)
     ,str
     ,halt, Next
-    ,(<+>),(<=>)
+    ,(<+>),(<=>), continue
     )
 import Brick.Main
     (resizeOrQuit
@@ -85,6 +85,9 @@ import Control.Monad.IO.Class (
 import GoLibrary as Lib
 import Data.List as L
 import NetworkInterface
+import Control.Concurrent
+import qualified Network.Socket as S
+import Networks (requestHandler)
 
 data Tick = Tick
 
@@ -125,7 +128,8 @@ data GameState = GameState {
     _editFocus :: FocusRing ResourceName,
     _submitIP :: Bool,
     _notification :: String,
-    _myIP :: String
+    _myIP :: String,
+    _socket :: Maybe S.Socket
 }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -379,8 +383,11 @@ coordToPoint p = case p of
 
 -- addNotification :: GameState -> String -> GameState
 -- TODO: send IP to network and return the result
-connectWithOppo :: GameState -> Bool
-connectWithOppo g = True
+connectWithOppo :: GameState -> IO NetworkResponse
+connectWithOppo g = do
+    let oppoIP = head (getEditContents (g^.opponentIP))
+    requestHandler (NetworkRequest CONNECT Nothing (Right oppoIP))
+
 
 drawMyIP :: GameState -> Widget ResourceName
 drawMyIP g = do
@@ -397,6 +404,10 @@ drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing
 
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
+
+addListener :: GameState -> IO NetworkResponse
+addListener g = do
+    requestHandler (NetworkRequest LISTEN Nothing (Right ""))
 
 -- Game Control: events, currently only handle resize event
 handleEvent :: GameState -> BrickEvent ResourceName Tick -> EventM ResourceName (Next GameState)
@@ -423,10 +434,17 @@ handleEvent g (T.VtyEvent ev) = case ev of
         _      -> return g
 handleEvent g (T.MouseDown r _ _ _) = case r of
     ConnectButton -> do
-        let submitStatus = connectWithOppo g
+        response <- liftIO $ connectWithOppo g
+        let submitStatus = response ^. result
         let msg = if submitStatus == True then "Connection Success!" else "Connection Error. Please make sure you entered the correct IP address."
-        continue $ g & (submitIP .~ submitStatus) & (notification .~ msg)
-    ListenButton -> continue $ g & (notification .~ "Listening...")
+        let socket' = if submitStatus == True then response^.responseSocket else Nothing
+        continue $ g & (submitIP .~ submitStatus) & (notification .~ msg) & (socket .~ socket')
+    ListenButton -> do
+        continue $ g & (notification .~ "Listening...")
+        -- TODO: will cause stuck
+        response <- liftIO $ addListener g
+        let massage = response ^. msg
+        continue $ g & (notification .~ massage) & (socket .~ response^.responseSocket)
     PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g

@@ -1,6 +1,7 @@
 module Networks(
     requestHandler,
     ) where
+import qualified Control.Exception         as E
 import           Data.ByteString.Char8     as D
 import           Lens.Micro
 import           Network.Socket
@@ -46,8 +47,10 @@ startClient addr = do
 
 connectHandler :: String -> IO NetworkResponse
 connectHandler addr = do
-    socket <- startClient addr
-    return $ NetworkResponse True (Just socket) "Connected"
+    result <- E.try (startClient addr) :: IO (Either E.SomeException Socket)
+    case result of
+        Left e -> return $ NetworkResponse False Nothing $ show e
+        Right s -> return $ NetworkResponse True (Just s) $ "Connected to " ++ show addr
 
 
 sendData :: Socket -> String -> IO ()
@@ -57,8 +60,10 @@ sendData sock msg = do
 
 sendDataHandler :: Socket -> String -> IO NetworkResponse
 sendDataHandler sock msg = do
-    sendData sock msg
-    return $ NetworkResponse True (Just sock) "Sent"
+    result <- E.try (sendData sock msg) :: IO (Either E.SomeException ())
+    case result of
+        Left e -> return $ NetworkResponse False Nothing $ show e
+        Right _ -> return $ NetworkResponse True Nothing "Send data success"
 
 recvDataHandler :: Socket -> String -> IO NetworkResponse
 recvDataHandler sock msg = do
@@ -68,4 +73,3 @@ disconnectHandler :: Socket -> String -> IO NetworkResponse
 disconnectHandler sock msg = do
     close sock
     return $ NetworkResponse True (Just sock) "Disconnected"
-
