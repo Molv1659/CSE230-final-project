@@ -512,8 +512,7 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
             _ <- liftIO $ do
                 let oppoIP = head (getEditContents (g^.opponentIP))
                 writeBChan (g^.channel) (Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
-            let submitStatus = True
-            continue $ g & (submitIP .~ submitStatus)
+            continue $ g
     ListenButton -> do
         -- issue a network request
         _ <- liftIO $ do
@@ -566,7 +565,15 @@ handleNetworkResponse g resp = do
             -- got a move from remote
             return $ processMove new_g point (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)
         Right m ->
-            return $ new_g & (notification .~ m)
+            -- event handlers
+            if take (length "Connected to") m == "Connected to" || take (length "Accept") m == "Accept" then
+                -- got a remote connection
+                return $ new_g & (notification .~ m) & (submitIP .~ True)
+            else if take (length "Connection closed") m == "Connection closed" then
+                -- end the remote connection
+                return $ new_g & (notification .~ m) & (submitIP .~ False)
+            else
+                return $ new_g & (notification .~ m)
         ) 
     $ g & (socket .~ (resp^.responseSocket)) & (notification .~ "Got new Move from remote")
 
