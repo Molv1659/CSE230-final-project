@@ -515,7 +515,7 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
             _ <- liftIO $ do
                 let oppoIP = head (getEditContents (g^.opponentIP))
                 writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
-            continue $ g & (submitIP .~ True)
+            continue $ g
     ListenButton -> do
         -- issue a network request
         _ <- liftIO $ do
@@ -534,12 +534,12 @@ handleEvent g (T.AppEvent tickOrNetwork) = case tickOrNetwork of
             do
                 new_g <- liftIO $ handleNetworkResponse g resp
                 case (new_g^.socket) of
-                    Nothing -> continue $ new_g & (listenSuccess .~ True)
+                    Nothing -> continue $ new_g
                     Just _ -> do
                         -- write new recv request to the socket
                         _ <- liftIO $ do
                             writeBChan (new_g^.channel) (Left $ Left $ NetworkRequest {_eventType=RECVDATA, _requestSocket=new_g^.socket,_action=Right ""})
-                        continue $ new_g & (listenSuccess .~ True)
+                        continue $ new_g
     Right tick -> do
         let (minute, sec) = g^.timer
     
@@ -580,12 +580,15 @@ handleNetworkResponse g resp = do
             return $ processMove new_g point (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)
         Right m ->
             -- event handlers
-            if take (length "Connected to") m == "Connected to" || take (length "Accept") m == "Accept" then
+            if take (length "Connected to") m == "Connected to" then
                 -- got a remote connection
                 return $ new_g & (notification .~ m) & (submitIP .~ True)
+            else if take (length "Accept") m == "Accept" then 
+                -- got a remote connection
+                return $ new_g & (notification .~ m) & (listenSuccess .~ True)
             else if take (length "Connection closed") m == "Connection closed" then
                 -- end the remote connection
-                return $ new_g & (notification .~ m) & (submitIP .~ False)
+                return $ new_g & (notification .~ m) & (submitIP .~ False) & (listenSuccess .~ False)
             else
                 return $ new_g & (notification .~ m)
         ) 
