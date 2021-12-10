@@ -521,8 +521,43 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
         _ <- liftIO $ do
             writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=LISTEN,_requestSocket=g^.socket,_action=(Right "")})
         continue $ g & (notification .~ "Listening...")
-    PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
-    ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
+    PassButton -> do
+        let game = g ^. boardState;
+            stone = game ^. Lib.player;
+            checkPassValid = Lib.isValidPass game stone
+            checkFinish = Lib.checkOnePass game
+        case checkPassValid of
+            "Not your turn." -> continue $ g & (notification .~ "Invalid Pass!")
+            "True"  -> case checkFinish of
+                False -> do
+                    _ <- liftIO $ do
+                        writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=SENDDATA,_requestSocket=g^.socket,_action=(Right "Pass")})
+                    continue $ g 
+                            & (boardState .~ (Lib.runPass game stone))
+                            & (notification .~ "Passed")
+                            & (timer .~ (10,0))
+                True  -> do
+                    _ <- liftIO $ do
+                        let game    = g ^. boardState;
+                            stone   = game ^. Lib.player;
+                            passMsg = "Finish Game. Winner is " ++ (show $ Lib.getWinner $ Lib.finishGo game)
+                        writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=SENDDATA,_requestSocket=g^.socket,_action=(Right passMsg)})                    
+                    continue $ g 
+                            & (boardState .~ (Lib.finishGo $ Lib.runPass game stone))
+                            & (notification .~ ("Finish Game. Winner is " ++ (show $ Lib.getWinner $ Lib.finishGo $ Lib.runPass game stone)))
+                            & (submitIP .~ False) 
+                            & (listenSuccess .~ False) 
+                            & (socket .~ Nothing)
+    ResignButton -> do
+        _ <- liftIO $ do
+            let game    = g ^. boardState;
+                stone   = game ^. Lib.player;
+                passMsg = "Finish Game. Winner is " ++ show (Lib.getOppositeStone stone)
+            writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=SENDDATA,_requestSocket=g^.socket,_action=(Right passMsg)})
+        continue $ g & (notification .~ "Opponent won")
+                & (submitIP .~ False) 
+                & (listenSuccess .~ False) 
+                & (socket .~ Nothing)
     _ -> continue g
 -- deal with network requests in the channel
 handleEvent g (T.AppEvent tickOrNetwork) = case tickOrNetwork of
@@ -586,6 +621,22 @@ handleNetworkResponse g resp = do
             else if take (length "Connection closed") m == "Connection closed" then
                 -- end the remote connection
                 return $ new_g & (notification .~ m) & (submitIP .~ False)
+            else if take (length "Finish") m == "Finish" then 
+                return $ new_g 
+                        & (boardState .~ (Lib.finishGo $ Lib.runPass (new_g ^. boardState) (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)))
+                        & (notification .~ m)
+                        & (submitIP .~ False) 
+                        & (listenSuccess .~ False) 
+                        & (socket .~ Nothing)
+            else if take (length "Pass") m == "Pass" then 
+                return $ new_g & (boardState .~ Lib.runPass (new_g ^. boardState) (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)) 
+                        & (timer .~ (10,0))
+            else if take (length "Winner is") m == "Winner is" then 
+                return $ new_g 
+                        & (notification .~ m) 
+                        & (submitIP .~ False) 
+                        & (listenSuccess .~ False) 
+                        & (socket .~ Nothing)
             else
                 return $ new_g & (notification .~ m)
         ) 

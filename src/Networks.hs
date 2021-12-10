@@ -32,7 +32,7 @@ requestHandler (NetworkRequest etype sock act) = case etype of
             Just real_sock -> 
                 case act of
                     Left p -> sendDataHandler real_sock (show p)
-                    Right _ -> return NetworkResponse{_result=False, _responseSocket=Just real_sock, _msg=Right "Point type expected for SENDDATA"}
+                    Right msg -> sendDataHandler real_sock msg
     RECVDATA -> 
         case sock of
             Just real_sock -> recvDataHandler real_sock
@@ -90,14 +90,17 @@ sendDataHandler sock msg = do
     r <- E.try (sendData sock msg) :: IO (Either E.SomeException ())
     case r of
         Left e  -> return $ NetworkResponse{_result=False, _responseSocket=Just sock, _msg = Right $ show e}
-        Right _ -> return $ NetworkResponse{_result=True, _responseSocket=Just sock, _msg = Right "Send data success"}
+        Right _ -> if take (length "Finish Game") msg == "Finish Game" then
+                       return $ NetworkResponse{_result=True, _responseSocket=Nothing, _msg = Right msg}
+                   else
+                       return $ NetworkResponse{_result=True, _responseSocket=Just sock, _msg = Right "Send data success"}
 
 deserialize :: String -> Either Point String
 deserialize point_string = case (readMaybe point_string:: Maybe Point) of
     Just p  -> Left p
     Nothing -> case length point_string of
                  0 -> Right "Connection closed by peer user"
-                 _ -> Right $ "Point parser error on for unpacked string: " ++ point_string ++ ", length: " ++ (show (length point_string))
+                 _ -> Right point_string
 
 recvDataHandler :: Socket -> IO NetworkResponse
 recvDataHandler sock = do

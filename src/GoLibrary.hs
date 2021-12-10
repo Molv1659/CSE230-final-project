@@ -93,6 +93,10 @@ runPass game@(Game b bz pl lm mh sb sw) stone = Game{
 checkTwoPass :: Game -> Bool
 checkTwoPass game@(Game b bz pl lm mh sb sw) = ((getPassNum mh)== 2)
 
+checkOnePass :: Game -> Bool
+checkOnePass game@(Game b bz pl lm mh sb sw) = ((getPassNum mh)== 1)
+
+
 getPassNum :: [Move] -> Int
 getPassNum []            = 0
 getPassNum ((Pass _):ms)   = 1 + getPassNum ms
