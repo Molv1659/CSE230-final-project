@@ -45,7 +45,7 @@ requestHandler (NetworkRequest etype sock act) = case etype of
 listenHandler :: IO NetworkResponse
 listenHandler = do
     (sock, addr) <- startServer
-    return $ NetworkResponse True (Just sock) $ (Right $ "Accept connection from " ++ show addr)
+    return $ NetworkResponse True (Just sock) $ (Right $ "Accepted connection from " ++ show addr)
 
 
 startServer :: IO (Socket, SockAddr)

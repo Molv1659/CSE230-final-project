@@ -44,6 +44,7 @@ import Brick.Widgets.Core
     ,strWrap
     ,emptyWidget
     ,padRight
+    ,padLeftRight
     ,padAll
     ,padTop
     ,withBorderStyle
@@ -87,15 +88,16 @@ import Control.Monad.IO.Class (
 --     readMaybe
 --     )
 import GoLibrary as Lib
-import Data.List as L
 import NetworkInterface
 
 import Control.Concurrent (forkIO)
 import qualified Network.Socket as S
 import Networks (requestHandler, getResponseMessage, getResponseStatus)
+import qualified Data.List as L
+import qualified Brick.Widgets.List as BL
 
 data Tick = Tick
-type NetworkEvent = (Either NetworkRequest NetworkResponse)
+type NetworkEvent = (Either (Either NetworkRequest NetworkResponse) Tick)
 
 data ResourceName = Board 
     | IPField 
@@ -126,20 +128,22 @@ stoneToPointPattern Empty   = EmptyStone
 -- Prefix the fields in GameState with underscore "_" to make lenses for it
 data GameState = GameState { 
     _dim::Int, 
-    _boardState::Lib.Game, 
+    _boardState :: Lib.Game, 
     _time::Int, 
     _pointLocMap:: M.Map Lib.Point PointLoc,
     _lastReportedClick :: Maybe (Int, Int),
     _opponentIP :: Editor String ResourceName,
     _editFocus :: FocusRing ResourceName,
     _submitIP :: Bool,
+    _listenSuccess :: Bool,
     _notification :: String,
-    _myIP :: String,
     _socket :: Maybe S.Socket,
     _currentRound :: Int,  -- the round used for display,
     _totalRound :: Int,  -- total number of rounds
     _snapshots :: [M.Map Lib.Point PointPattern],
-    _channel :: BChan NetworkEvent
+    _channel :: BChan NetworkEvent,
+    _timer :: (Int, Int), -- countdown timer
+    _timeIsUp :: Bool
 }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -204,16 +208,18 @@ getInitialState chan =
         _time=0,   -- how many rounds have passed
         _pointLocMap=buildPointLocMap d,  -- locations of black
         _lastReportedClick=Nothing,
-        _myIP="Placeholder",
         _opponentIP=(editor IPField Nothing ""),
         _editFocus=(focusRing [IPField]),
         _submitIP=False,
-        _notification="Mock Notification",
+        _listenSuccess=False,
+        _notification="Welcome to the Go game :)",
         _socket=Nothing,
         _currentRound=0,
         _totalRound=0,
         _snapshots=[M.fromList points],
-        _channel=chan
+        _channel=chan,
+        _timer=(10, 0),
+        _timeIsUp=False
         }
     in s
 
@@ -282,12 +288,13 @@ drawRoomInfo g = vLimit 1 $ hBox [hBorder, vBorder, str " Test room ", vBorder, 
 
 -- display IP info and connect/listen buttons
 drawIPInfo :: GameState -> Widget ResourceName
-drawIPInfo g = case g^.submitIP of
-    True -> drawMyIP g
-            <=> str "Opponent's IP: " <+> (str . unlines $ getEditContents $ g^.opponentIP)
-    _    -> vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game. Note that clicking Connect will set your color to white. Player who wants to play black should click Listen instead of Connect."
+drawIPInfo g = do
+    if (g^.submitIP || g^.listenSuccess)
+        then emptyWidget
+        else vBox [strWrap "Please enter the opponent's IP and click CONNECT or LISTEN to connection request to start a game."
+                ,str "To play white: click Connect"
+                ,str "To play black: click Listen"
                 ,hCenterWith (Just '-') (str "-")
-                ,drawMyIP g
                 ,drawEditor g
                 ,str "\n"
                 ,(drawButton ConnectButton "Connect" <+> padAll 1 (str "OR") <+> drawButton ListenButton "Listen")
@@ -296,7 +303,7 @@ drawIPInfo g = case g^.submitIP of
 
 -- display some notification on the bottom panel
 drawNotification :: GameState -> Widget ResourceName
-drawNotification g = vBox [strWrap "Notification", strWrap (g^.notification)]
+drawNotification g = vBox [hCenterWith Nothing $ str "NOTIFICATION", str "\n", strWrap (g^.notification)]
 
 -- display player/watchers information on the left panel
 drawLeftColumn :: GameState -> Widget ResourceName
@@ -307,18 +314,15 @@ drawLeftColumn g = padAll 1 $ hLimit 30 $ vBox [
 -- draw the current board and other game info using GameState in the middle panel
 -- currently an empty board is drawn using realDrawBoard
 drawBoard :: GameState -> Widget ResourceName
-drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, str " Board ", vBorder, hBorder]
+drawBoard g = vBox [vLimit 1 $ hBox [hBorder, vBorder, padLeftRight 1 $ printRounds g, vBorder, hBorder]
+                    ,hCenterWith Nothing $ str "Tip: Use Left/Right Key to view history"
                     ,realDrawBoard g
-                    ,drawLastClick g
-                    ,printRounds g
+                    ,hCenterWith Nothing $ drawLastClick g
                     -- ,printMoveResults g
                     ]
 
 printRounds :: GameState -> Widget ResourceName
-printRounds g = hCenterWith Nothing (vBox[
-    hCenterWith Nothing $ str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show ((P.length (g ^. snapshots)) - 1)
-    , hCenterWith Nothing $ str "Tip: Use Left/Right Key to view history"
-    ])
+printRounds g = str $ "Round: " ++ show (g ^. currentRound) ++ "/" ++ show ((P.length (g ^. snapshots)) - 1)
 
 -- helper function, either draw a stone/empty intersection point
 -- currently only draws empty intersection point
@@ -388,8 +392,8 @@ getCurrentMove g = let
 -- display some game stats on the right panel
 -- TODO: change black move to dynamic + create timer
 drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str $ (show $ getCurrentMove g) ++ "'s move: 10:00"
-                     ,case g^.boardState^.player of
+drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move - " <+> drawCounter g
+                     ,case g^.boardState^.player of 
                          Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
                                 <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
                          _     -> makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
@@ -423,12 +427,6 @@ connectWithOppo g = do
     let oppoIP = head (getEditContents (g^.opponentIP))
     requestHandler (NetworkRequest CONNECT Nothing (Right oppoIP))
 
-
-drawMyIP :: GameState -> Widget ResourceName
-drawMyIP g = do
-    -- TODO: get my IP from network
-    str "My IP: " <+> str (g^.myIP)
-
 -- draw opponent ip editor
 drawEditor :: GameState -> Widget ResourceName
 drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
@@ -436,6 +434,18 @@ drawEditor g = str "Opponent's IP: " <+> (vLimit 1 edit)
 
 drawButton :: ResourceName -> String -> Widget ResourceName
 drawButton r s = hCenterWith Nothing (clickable r $ border $ hCenterWith Nothing $ str s)
+
+drawCounter :: GameState -> Widget ResourceName
+drawCounter g = do
+    let (minute, sec) = g^.timer
+    if sec < 10 && minute < 10
+        then str $ "0" <> (show minute) <> ":" <> "0" <> (show sec)
+    else if minute < 10
+        then str $ "0" <> (show minute) <> ":" <> (show sec)
+    else if sec < 10
+        then str $ (show minute) <> ":" <> "0" <> (show sec)
+    else str $ (show minute) <> ":" <> (show sec)
+    
 
 cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocation ResourceName)
 cursor = focusRingCursor (^.editFocus)
@@ -486,8 +496,8 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
             in case result' of
                 True -> do
                     _ <- (liftIO $ do
-                        writeBChan (g ^. channel) (P.Left $ NetworkRequest {_eventType=SENDDATA, _requestSocket=g^.socket,_action=Left p}))
-                    continue $ processMove g p stone
+                        writeBChan (g ^. channel) (Left $ Left $ NetworkRequest {_eventType=SENDDATA, _requestSocket=g^.socket,_action=Left p}))
+                    continue $ (processMove g p stone) & (timeIsUp .~ True) -- tells timer to reset
                 False -> continue $ g & (notification .~ "Invalid move!")
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
@@ -511,32 +521,44 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
         do
             _ <- liftIO $ do
                 let oppoIP = head (getEditContents (g^.opponentIP))
-                writeBChan (g^.channel) (Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
-            let submitStatus = True
-            continue $ g & (submitIP .~ submitStatus)
+                writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
+            continue $ g & (submitIP .~ True)
     ListenButton -> do
         -- issue a network request
         _ <- liftIO $ do
-            writeBChan (g^.channel) (Left $ NetworkRequest {_eventType=LISTEN,_requestSocket=g^.socket,_action=(Right "")})
+            writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=LISTEN,_requestSocket=g^.socket,_action=(Right "")})
         continue $ g & (notification .~ "Listening...")
     PassButton -> continue $ g & (notification .~ "Passed") -- TODO: add pass logic
     ResignButton -> continue $ g & (notification .~ "Opponent won") -- TODO: add resign logic
     _ -> continue g
 -- deal with network requests in the channel
-handleEvent g (T.AppEvent reqOrResp) = case reqOrResp of
-    Left req -> do
-        new_g <- liftIO $ handleNetworkRequest g req
-        continue $ new_g
-    Right resp -> 
-        do
-            new_g <- liftIO $ handleNetworkResponse g resp
-            case (new_g^.socket) of
-                Nothing -> continue $ new_g
-                Just _ -> do
-                    -- write new recv request to the socket
-                    _ <- liftIO $ do
-                        writeBChan (new_g^.channel) (Left $ NetworkRequest {_eventType=RECVDATA, _requestSocket=new_g^.socket,_action=Right ""})
-                    continue $ new_g
+handleEvent g (T.AppEvent tickOrNetwork) = case tickOrNetwork of
+    Left reqOrResp -> case reqOrResp of
+        Left req -> do
+            new_g <- liftIO $ handleNetworkRequest g req
+            continue $ new_g
+        Right resp -> 
+            do
+                new_g <- liftIO $ handleNetworkResponse g resp
+                case (new_g^.socket) of
+                    Nothing -> continue $ new_g & (listenSuccess .~ True)
+                    Just _ -> do
+                        -- write new recv request to the socket
+                        _ <- liftIO $ do
+                            writeBChan (new_g^.channel) (Left $ Left $ NetworkRequest {_eventType=RECVDATA, _requestSocket=new_g^.socket,_action=Right ""})
+                        continue $ new_g & (listenSuccess .~ True)
+    Right tick -> do
+        let (minute, sec) = g^.timer
+    
+        if (g^.timeIsUp || not (g^.submitIP))
+            then continue $ g & (timer .~ (10,0))
+        else if minute == 0 && sec == 0
+            then continue $ g & (timeIsUp .~ True) & (notification .~ "Time is up! Switching to opponent...") -- TODO: switch to opponent and set timeisup to false
+        else if minute > 0 && sec == 0
+            then if minute == 10
+                then continue $ g & (timer .~ (minute-1,59)) & (notification .~ "Your turn to play! Timer has started.")
+                else continue $ g & (timer .~ (minute-1,59))
+        else continue $ g & (timer .~ (minute, sec-1))
 handleEvent g _ = continue g
 
 -- ===== Start of AppEvent handlers ====
@@ -555,7 +577,7 @@ handleNetworkRequest :: GameState -> NetworkRequest -> IO GameState
 handleNetworkRequest g req = do
     _ <- liftIO $ forkIO $ do {
         resp <- requestHandler req;
-        writeBChan (g^.channel) (Right resp);
+        writeBChan (g^.channel) (Left $ Right resp);
         }
     return $ maybeChangeColor g req
 

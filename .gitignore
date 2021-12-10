@@ -3,3 +3,5 @@
 CS_SESSION
 dist*
 *ghc*
+.vscode
+.stack*
