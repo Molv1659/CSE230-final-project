@@ -555,9 +555,7 @@ handleEvent g (T.AppEvent tickOrNetwork) = case tickOrNetwork of
         else if minute == 0 && sec == 0
             then continue $ g & (timeIsUp .~ True) & (notification .~ "Time is up! Switching to opponent...") -- TODO: switch to opponent and set timeisup to false
         else if minute > 0 && sec == 0
-            then if minute == 10
-                then continue $ g & (timer .~ (minute-1,59)) & (notification .~ "Your turn to play! Timer has started.")
-                else continue $ g & (timer .~ (minute-1,59))
+            then continue $ g & (timer .~ (minute-1,59))
         else continue $ g & (timer .~ (minute, sec-1))
 handleEvent g _ = continue g
 
@@ -588,7 +586,15 @@ handleNetworkResponse g resp = do
             -- got a move from remote
             return $ processMove new_g point (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)
         Right m ->
-            return $ new_g & (notification .~ m)
+            -- event handlers
+            if take (length "Connected to") m == "Connected to" || take (length "Accept") m == "Accept" then
+                -- got a remote connection
+                return $ new_g & (notification .~ m) & (submitIP .~ True)
+            else if take (length "Connection closed") m == "Connection closed" then
+                -- end the remote connection
+                return $ new_g & (notification .~ m) & (submitIP .~ False)
+            else
+                return $ new_g & (notification .~ m)
         ) 
     $ g & (socket .~ (resp^.responseSocket)) & (notification .~ "Got new Move from remote")
 
