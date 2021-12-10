@@ -29,18 +29,17 @@ which should build and run the program in the current terminal. Currently, the U
 - [x] create seamless division of UI
 - [x] use border to draw go board
 - [x] find out how to draw go stone
-- [ ] draw stone dynamically according to the stone state in the logic part
-- [ ] Network communication
-- [ ] Display score on the "game result" panel on the right
-- [ ] Provide "Pass" button to the board and associate event handler to it
-- [ ] Replace "Player 1" with "You (_color_)" and "Player 2" with "Opponent (_color_)"
-- [ ] Provide Edit box for entering opponent's IP and buttons for connecting to opponents and listening for game requests
-- [ ] (**Advanced**) Add "View history" feature to view previous moves and impacts (basically storing and displaying snapshots of the board for each valid move)
+- [x] draw stone dynamically according to the stone state in the logic part
+- [x] Network communication
+- [x] Display score on the "game result" panel on the right
+- [x] Provide "Pass" button to the board and associate event handler to it
+- [x] Replace "Player 1" with "You (_color_)" and "Player 2" with "Opponent (_color_)"
+- [x] Provide Edit box for entering opponent's IP and buttons for connecting to opponents and listening for game requests
+- [x] (**Advanced**) Add "View history" feature to view previous moves and impacts (basically storing and displaying snapshots of the board for each valid move)
 
 ### events
-- [x] redraw upon event, quit with events other then resize.
-- [x] Get mouse position and translate them into the location of stones.
-
+Event handling in GoOL concepts:
+![image](pic/GoOL_Event_Handling.png)
 
 ## Overview
 We are going to develop a Go game online client program in Haskell. Using our client program, two players can be connected by network to play Go together in a gaming room, where the board and other related information will be shown in a command-line interface built by the Brick library. The software may allow others to join the gaming room and watch the live of the ongoing game, and in order to provide a better experience, onlookers who join halfway can review the game history step by step.
@@ -50,6 +49,7 @@ As the oldest board game continuously played to the present day, the Go game has
 Considering the difficulty of the Go game, a standard 19 * 19 checkerboard may be too advanced for beginners. To help novices get started, we support changing the boards to different sizes.
 
 ## Program Structure
+![image](pic/GoOL_Structure.jpg)
 The program is based on 3 main modules:
 1. Network communication
 - Supports point-to-point communication between two players;
