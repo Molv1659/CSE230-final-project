@@ -33,26 +33,23 @@ import Brick.Focus
 import Brick.Widgets.Center
     (hCenterWith
     ,centerLayer
-    ,vCenterWith
     )
 import Brick.Widgets.Core 
     (hBox, vBox
     ,hLimit, vLimit
-    ,hLimitPercent
-    ,withBorderStyle, joinBorders
+    ,withBorderStyle
     ,clickable
     ,strWrap
     ,emptyWidget
     ,padRight
     ,padLeftRight
     ,padAll
-    ,padTop
     ,withBorderStyle
     )
 import Brick.Widgets.Border
     (vBorder, hBorder, border, joinableBorder, borderWithLabel)
 import Brick.Widgets.Border.Style
-    (unicode, unicodeRounded, unicodeBold)
+    (unicodeRounded, unicodeBold)
 import qualified Brick.Types as T
 import Brick.BChan
 import Lens.Micro.TH (
@@ -84,9 +81,6 @@ import Control.Monad (
 import Control.Monad.IO.Class (
     liftIO
     )
--- import Text.Read (
---     readMaybe
---     )
 import GoLibrary as Lib
 import NetworkInterface
 
@@ -392,7 +386,7 @@ getCurrentMove g = let
 -- display some game stats on the right panel
 -- TODO: change black move to dynamic + create timer
 drawGameInfo :: GameState -> Widget ResourceName
-drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str "Black move - " <+> drawCounter g
+drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str (show (getCurrentMove g) ++ "'s turn - ") <+> drawCounter g
                      ,case g^.boardState^.player of 
                          Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
                                 <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
@@ -451,9 +445,9 @@ cursor :: GameState -> [T.CursorLocation ResourceName] -> Maybe (T.CursorLocatio
 cursor = focusRingCursor (^.editFocus)
 
 -- UI: Whether handler can modify currentRound
-canModify :: Int -> Int -> (Int -> Int) -> Bool
-canModify cur lim f = let res = f cur
-    in if res <= lim && res >= 0 then
+isValid :: Int -> Int -> Bool
+isValid cur lim = 
+    if cur <= lim && cur >= 0 then
         True
     else
         False
@@ -471,11 +465,10 @@ processMove g p stone =
     & (lastReportedClick .~ coord) 
     & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
     & (totalRound %~ (+1)) 
-    & (currentRound %~ if (g^.totalRound) == (g^.currentRound) then
+    & currentRound %~ (if (g^.totalRound) == (g^.currentRound) then
             (+) 1
         else
-            (+) 0
-        )
+            (+) 0)
     & (\new_g -> new_g & snapshots %~ (++ [M.fromList $ getStonesList new_g]))
 
 -- Game Control: events, currently only handle resize event
@@ -501,18 +494,18 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
                 False -> continue $ g & (notification .~ "Invalid move!")
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
-    (EvKey KLeft []) -> continue =<< let f = (-) 1
-        in case canModify (g^.currentRound) (g^.totalRound) f of
+    (EvKey KLeft []) -> continue =<< let res = (g^.currentRound) - 1
+        in case isValid res (g^.totalRound) of
             True -> return $ g 
-                & currentRound %~ f 
+                & currentRound .~ res 
                 & (notification .~ "Got Left arrow key pressed")
-            _ -> return $ g 
-    (EvKey KRight []) -> continue =<< let f = (+) 1
-        in case canModify (g^.currentRound) (g^.totalRound) f of
+            _ -> return $ g & (notification .~ ("You are already at the earliest round!" ++ (show (g^.currentRound)) ++ "/" ++ (show (g^.totalRound))))
+    (EvKey KRight []) -> continue =<< let res = (g^.currentRound) + 1
+        in case isValid res (g^.totalRound) of
             True -> return $ g 
-                & currentRound %~ f 
+                & currentRound .~ res
                 & notification .~ "Got Right arrow key pressed"
-            _ -> return $ g 
+            _ -> return $ g & (notification .~ ("You are already at the latest round!"++ (show (g^.currentRound)) ++ "/" ++ (show (g^.totalRound))))
     _ -> continue =<< case focusGetCurrent (g^.editFocus) of
         Just IPField -> T.handleEventLensed g opponentIP handleEditorEvent ev
         _      -> return g
