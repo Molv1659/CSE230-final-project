@@ -122,8 +122,7 @@ stoneToPointPattern Empty   = EmptyStone
 -- Prefix the fields in GameState with underscore "_" to make lenses for it
 data GameState = GameState { 
     _dim::Int, 
-    _boardState :: Lib.Game, 
-    _time::Int, 
+    _boardState :: Lib.Game,
     _pointLocMap:: M.Map Lib.Point PointLoc,
     _lastReportedClick :: Maybe (Int, Int),
     _opponentIP :: Editor String ResourceName,
@@ -201,7 +200,6 @@ getInitialState chan =
         s = GameState {
         _dim=d,  -- size of the board, need to be updated in appStartEvent
         _boardState = createGo stone d,
-        _time=0,   -- how many rounds have passed
         _pointLocMap=buildPointLocMap d,  -- locations of black
         _lastReportedClick=Nothing,
         _opponentIP=(editor IPField Nothing ""),
@@ -217,6 +215,18 @@ getInitialState chan =
         _timer=defaultTimer
         }
     in s
+
+-- when network connection is set up, reset currentState
+resetGameState :: GameState -> GameState
+resetGameState g =
+    let stone = g^.boardState^.Lib.player
+        d = g^.dim
+    in g & (boardState .~ (createGo stone d))
+    & (lastReportedClick .~ Nothing)
+    & (currentRound .~ 0)
+    & (totalRound .~ 0)
+    & (snapshots %~ (take 1))
+    & (notification %~ (++ "\nGame State reset"))
 
 decidePointLoc :: GameState -> Int -> Int -> PointLoc
 decidePointLoc g i j = 
@@ -598,7 +608,6 @@ maybeChangeColor g req =
     case (req^.eventType) of
         CONNECT -> g 
             & (boardState %~ (& Lib.player .~ Lib.White))
-            & (snapshots .~ [(g ^. snapshots) !! 0])
         _ -> g
 
 
@@ -621,10 +630,10 @@ handleNetworkResponse g resp = do
             -- event handlers
             if take (length "Connected to") m == "Connected to" then
                 -- got a remote connection
-                return $ new_g & (notification .~ m) & (submitIP .~ True)
+                return $ resetGameState $ new_g & (notification .~ m) & (submitIP .~ True)
             else if take (length "Accepted") m == "Accepted" then 
                 -- got a remote connection
-                return $ new_g & (notification .~ m) & (listenSuccess .~ True)
+                return $ resetGameState $ new_g & (notification .~ m) & (listenSuccess .~ True)
             else if take (length "Connection closed") m == "Connection closed" then
                 -- end the remote connection
                 return $ new_g & (notification .~ m) & (submitIP .~ False) & (listenSuccess .~ False)
