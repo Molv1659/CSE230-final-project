@@ -136,8 +136,7 @@ data GameState = GameState {
     _totalRound :: Int,  -- total number of rounds
     _snapshots :: [M.Map Lib.Point PointPattern],
     _channel :: BChan NetworkEvent,
-    _timer :: (Int, Int), -- countdown timer
-    _timeIsUp :: Bool
+    _timer :: (Int, Int) -- countdown timer
 }
 
 -- make "lenses" for the UI state for maintainable and extendible getter/setter
@@ -187,6 +186,9 @@ buildPointLocMap l = M.unions [
     ]
     ]
 
+defaultTimer :: (Int, Int)
+defaultTimer = (10,0)
+
 defaultBoardSize :: Int
 defaultBoardSize = 19
 
@@ -212,8 +214,7 @@ getInitialState chan =
         _totalRound=0,
         _snapshots=[M.fromList points],
         _channel=chan,
-        _timer=(10, 0),
-        _timeIsUp=False
+        _timer=defaultTimer
         }
     in s
 
@@ -388,10 +389,10 @@ getCurrentMove g = let
 drawGameInfo :: GameState -> Widget ResourceName
 drawGameInfo g = hLimit 30 $ vBox [padAll 1 $ hCenterWith Nothing $ str (show (getCurrentMove g) ++ "'s turn - ") <+> drawCounter g
                      ,case g^.boardState^.player of 
-                         Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) True
-                                <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) False
-                         _     -> makeBorderBox "Myself" White (g^.boardState^.scoreWhite) True
-                                <=> makeBorderBox "Opponent" Black (g^.boardState^.scoreBlack) False
+                         Black -> makeBorderBox "Myself" Black (g^.boardState^.scoreBlack) (getCurrentMove g == Black)
+                                <=> makeBorderBox "Opponent" White (g^.boardState^.scoreWhite) (getCurrentMove g == White)
+                         _     -> makeBorderBox "Myself" White (g^.boardState^.scoreWhite) (getCurrentMove g == White)
+                                <=> makeBorderBox "Opponent" Black (g^.boardState^.scoreBlack) (getCurrentMove g == Black)
                      ,hCenterWith Nothing $ hLimit 10 $ drawButton PassButton "Pass"
                      ,hCenterWith Nothing $ hLimit 10 $ drawButton ResignButton "Resign"
                     ]
@@ -465,6 +466,7 @@ processMove g p stone =
     & (lastReportedClick .~ coord) 
     & (boardState .~ (Lib.runMove (g ^. boardState) p stone))
     & (totalRound %~ (+1)) 
+    & (timer .~ defaultTimer)
     & currentRound %~ (if (g^.totalRound) == (g^.currentRound) then
             (+) 1
         else
@@ -490,7 +492,7 @@ handleEvent g (T.MouseDown Board BLeft _ loc) = do  -- left click to place stone
                 True -> do
                     _ <- (liftIO $ do
                         writeBChan (g ^. channel) (Left $ Left $ NetworkRequest {_eventType=SENDDATA, _requestSocket=g^.socket,_action=Left p}))
-                    continue $ (processMove g p stone) & (timeIsUp .~ True) -- tells timer to reset
+                    continue $ (processMove g p stone) & (timer .~ defaultTimer)
                 False -> continue $ g & (notification .~ "Invalid move!")
 handleEvent g (T.VtyEvent ev) = case ev of
     (EvKey KEsc []) -> halt g
@@ -515,7 +517,7 @@ handleEvent g (T.MouseDown r _ _ _) = case r of
             _ <- liftIO $ do
                 let oppoIP = head (getEditContents (g^.opponentIP))
                 writeBChan (g^.channel) (Left $ Left $ NetworkRequest {_eventType=CONNECT, _requestSocket=g^.socket,_action=Right oppoIP})
-            continue $ g & (submitIP .~ True)
+            continue $ g
     ListenButton -> do
         -- issue a network request
         _ <- liftIO $ do
@@ -569,19 +571,21 @@ handleEvent g (T.AppEvent tickOrNetwork) = case tickOrNetwork of
             do
                 new_g <- liftIO $ handleNetworkResponse g resp
                 case (new_g^.socket) of
-                    Nothing -> continue $ new_g & (listenSuccess .~ True)
+                    Nothing -> continue $ new_g
                     Just _ -> do
                         -- write new recv request to the socket
                         _ <- liftIO $ do
                             writeBChan (new_g^.channel) (Left $ Left $ NetworkRequest {_eventType=RECVDATA, _requestSocket=new_g^.socket,_action=Right ""})
-                        continue $ new_g & (listenSuccess .~ True)
+                        continue $ new_g
     Right tick -> do
         let (minute, sec) = g^.timer
     
-        if (g^.timeIsUp || not (g^.submitIP))
-            then continue $ g & (timer .~ (10,0))
+        if ((not (g^.submitIP) && not (g^.listenSuccess)))
+            then continue $ g & (timer .~ defaultTimer)
         else if minute == 0 && sec == 0
-            then continue $ g & (timeIsUp .~ True) & (notification .~ "Time is up! Switching to opponent...") -- TODO: switch to opponent and set timeisup to false
+            then if ((getCurrentMove g) == (g^.boardState^.player))
+                then continue $ g & (timer .~ defaultTimer) & (notification .~ "Time is up! Switching to opponent...")
+                else continue $ g & (timer .~ defaultTimer) & (notification .~ "It's your turn to play! Timer has started.")
         else if minute > 0 && sec == 0
             then continue $ g & (timer .~ (minute-1,59))
         else continue $ g & (timer .~ (minute, sec-1))
@@ -611,16 +615,19 @@ handleNetworkResponse :: GameState -> NetworkResponse -> IO GameState
 handleNetworkResponse g resp = do
     (\new_g -> case (resp^.msg) of
         Left point ->
-            -- got a move from remote
+            -- got a move from remote and reset timer
             return $ processMove new_g point (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)
         Right m ->
             -- event handlers
-            if take (length "Connected to") m == "Connected to" || take (length "Accept") m == "Accept" then
+            if take (length "Connected to") m == "Connected to" then
                 -- got a remote connection
                 return $ new_g & (notification .~ m) & (submitIP .~ True)
+            else if take (length "Accepted") m == "Accepted" then 
+                -- got a remote connection
+                return $ new_g & (notification .~ m) & (listenSuccess .~ True)
             else if take (length "Connection closed") m == "Connection closed" then
                 -- end the remote connection
-                return $ new_g & (notification .~ m) & (submitIP .~ False)
+                return $ new_g & (notification .~ m) & (submitIP .~ False) & (listenSuccess .~ False)
             else if take (length "Finish") m == "Finish" then 
                 return $ new_g 
                         & (boardState .~ (Lib.finishGo $ Lib.runPass (new_g ^. boardState) (Lib.getOppositeStone $ new_g^.boardState^.Lib.player)))
