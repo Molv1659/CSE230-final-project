@@ -1,7 +1,8 @@
 module Networks(
     requestHandler,
     getResponseMessage,
-    getResponseStatus
+    getResponseStatus,
+    getResponseSocket
     ) where
     
 import Prelude
@@ -122,3 +123,7 @@ getResponseMessage (NetworkResponse _ _ (Left m)) = ""
 
 getResponseStatus :: NetworkResponse -> Bool
 getResponseStatus (NetworkResponse status _ _) = status
+
+getResponseSocket :: NetworkResponse -> Socket
+getResponseSocket (NetworkResponse _ Nothing _) = error "No socket"
+getResponseSocket (NetworkResponse _ (Just sock) _) = sock

@@ -1,3 +1,4 @@
+import Network.Socket
 import Networks
 import NetworkInterface
 import Control.Concurrent
@@ -7,41 +8,62 @@ main = do
     args <- getArgs
     if length args /= 1 then
         putStrLn "Usage: add argument server or client to test network by adding '--test-arguments args'"
-    else if args !! 0 == "server" then
+    else if head args == "server" then
         servertest
-    else if args !! 0 == "client" then
+    else if head args == "client" then
         clienttest
     else
-        putStrLn $ "Usage: add argument server or client to test network by adding '--test-arguments args'"
+        putStrLn "Usage: add argument server or client to test network by adding '--test-arguments args'"
 
 servertest :: IO ()
 servertest = do
     putStrLn "test server"
     listentestRes <- listentest
-    putStrLn ("LISTEN test:" ++ show listentestRes)
+    putStrLn ("CONNECT test:" ++ show (getResponseStatus listentestRes))
+    recvRes <- recvtest $ getResponseSocket listentestRes
+    putStrLn ("RECV test:" ++ show (getResponseMessage recvRes == "Test!"))
 
 clienttest :: IO ()
 clienttest = do
     putStrLn "test client"
     connecttestRes <- connecttest "127.0.0.1"
-    putStrLn ("CONNECT test:" ++ show connecttestRes)
+    putStrLn ("CONNECT test:" ++ show (getResponseStatus connecttestRes))
+    sendRes <- sendtest "Test!" $ getResponseSocket connecttestRes
+    putStrLn ("SEND test:" ++ show (getResponseStatus sendRes))
 
-listentest :: IO Bool
+
+listentest :: IO NetworkResponse
 listentest = do
     let request = NetworkRequest {
         _eventType = LISTEN,
         _requestSocket = Nothing,
         _action = Right ""
     }
-    response <- requestHandler request
-    return $ getResponseStatus response
+    requestHandler request
 
-connecttest :: String -> IO Bool
+connecttest :: String -> IO NetworkResponse
 connecttest ip = do
     let request = NetworkRequest {
         _eventType = CONNECT,
         _requestSocket = Nothing,
         _action = Right ip
     }
-    response <- requestHandler request
-    return $ getResponseStatus response
+    requestHandler request
+
+sendtest :: String -> Socket -> IO NetworkResponse
+sendtest msg s = do
+    let request = NetworkRequest {
+        _eventType = SENDDATA,
+        _requestSocket = Just s,
+        _action = Right msg
+    }
+    requestHandler request
+
+recvtest :: Socket -> IO NetworkResponse
+recvtest s = do
+    let request = NetworkRequest {
+        _eventType = RECVDATA,
+        _requestSocket = Just s,
+        _action = Right ""
+    }
+    requestHandler request
