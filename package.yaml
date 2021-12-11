@@ -48,7 +48,16 @@ executables:
 tests:
   CSE230-final-projects-test:
     main:                Spec.hs
-    source-dirs:         test
+    source-dirs:         test/GoLibrary
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - CSE230-final-projects
+  NetworkTest:
+    main:                NetworkTest.hs
+    source-dirs:         test/Network
     ghc-options:
     - -threaded
     - -rtsopts
